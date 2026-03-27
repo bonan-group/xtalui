@@ -245,7 +245,9 @@ def transformed_cell_axis_labels(scene: SceneData, camera: CameraState) -> list[
     return [(label, point @ camera.orientation.T) for label, point in label_points]
 
 
-def transformed_bond_segments(scene: SceneData, camera: CameraState, cutoff_scale: float = 1.0) -> list[tuple[np.ndarray, np.ndarray]]:
+def transformed_bond_segments(
+    scene: SceneData, camera: CameraState, cutoff_scale: float = 1.0
+) -> list[tuple[np.ndarray, np.ndarray]]:
     if len(scene.positions) < 2:
         return []
     # Match ASE GUI bond detection: periodic neighbor list with a 1.5x

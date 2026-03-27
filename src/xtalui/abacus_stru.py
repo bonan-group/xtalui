@@ -69,7 +69,9 @@ def _read_blocks(path: Path) -> dict[str, list[str]]:
 
 def _cell_from_blocks(blocks: dict[str, list[str]], lattice_constant: float) -> np.ndarray:
     if "LATTICE_VECTORS" in blocks:
-        vectors = np.array([[float(value) for value in line.split()] for line in blocks["LATTICE_VECTORS"]], dtype=float)
+        vectors = np.array(
+            [[float(value) for value in line.split()] for line in blocks["LATTICE_VECTORS"]], dtype=float
+        )
         return vectors * lattice_constant * Bohr
     if "LATTICE_PARAMETERS" in blocks or "LATTICE_PARAMETER" in blocks:
         raise ValueError(
@@ -117,9 +119,7 @@ def _parse_positions(
 
 def _parse_atom_line(line: str) -> dict[str, list[float] | float | tuple[str, list[float]]]:
     fields = line.split()
-    result: dict[str, list[float] | float | tuple[str, list[float]]] = {
-        "coord": [float(value) for value in fields[:3]]
-    }
+    result: dict[str, list[float] | float | tuple[str, list[float]]] = {"coord": [float(value) for value in fields[:3]]}
 
     idx = 3
     while idx < len(fields):
@@ -134,7 +134,12 @@ def _parse_atom_line(line: str) -> dict[str, list[float] | float | tuple[str, li
         elif lowered in {"mag", "magmom"}:
             if idx + 5 < len(fields) and fields[idx + 2].lower() == "angle1":
                 idx += 6
-            elif idx + 3 < len(fields) and _is_number(fields[idx + 1]) and _is_number(fields[idx + 2]) and _is_number(fields[idx + 3]):
+            elif (
+                idx + 3 < len(fields)
+                and _is_number(fields[idx + 1])
+                and _is_number(fields[idx + 2])
+                and _is_number(fields[idx + 3])
+            ):
                 idx += 4
             else:
                 idx += 2

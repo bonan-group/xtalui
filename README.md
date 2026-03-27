@@ -1,12 +1,15 @@
 # xtalui
 
+[![CI](https://github.com/bonan-group/xtalui/actions/workflows/ci.yml/badge.svg)](https://github.com/bonan-group/xtalui/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/xtalui.svg)](https://pypi.org/project/xtalui/)
+
 `xtalui` is a terminal-first crystal structure viewer for atomistic and crystalline structures.
 
 ![xtalui demo](xtalui.gif)
 
 It renders structures directly in the terminal using:
 
-- Unicode and Braille line rendering for cell edges and bonds
+- ASCII, Unicode, and Braille rendering for cell edges, bonds, and atoms
 - depth-aware atom glyphs or element labels
 - interactive camera controls without launching a GUI
 - a single-command CLI: `xtal STRUCTURE_FILE`
@@ -25,9 +28,23 @@ It renders structures directly in the terminal using:
 
 Recommended for daily use: install `xtal` as a standalone `uv` tool so it is not tied to a project virtual environment.
 
+Once the package is published on PyPI:
+
+```bash
+uv tool install xtalui
+```
+
+Directly from GitHub:
+
+```bash
+uv tool install git+https://github.com/bonan-group/xtalui
+```
+
 From a local checkout:
 
 ```bash
+git clone https://github.com/bonan-group/xtalui.git
+cd xtalui
 uv tool install --editable .
 ```
 
@@ -47,7 +64,7 @@ For development work inside the repository:
 
 ```bash
 uv venv --python /usr/bin/python3 .venv
-uv sync --dev
+uv sync --extra dev
 ```
 
 You can also run it without activating the environment:
@@ -55,6 +72,15 @@ You can also run it without activating the environment:
 ```bash
 uv run xtal --help
 uv run python -m xtalui --help
+```
+
+## Development
+
+```bash
+uv sync --extra dev
+uv run pytest -q
+uv run ruff check .
+uv run ruff format --check .
 ```
 
 ## Usage
@@ -110,3 +136,14 @@ uv run xtal examples/graphite_hexagonal.cif
 - `STRU` files that rely on `LATTICE_PARAMETER(S)` plus `latname` from a separate `INPUT` file are not supported.
 - Braille mode is the default line renderer because it provides smoother terminal line quality.
 - Example CIF files in [`examples/`](/home/bonan/appdir/atomtui/examples) are generated with ASE for common crystal prototypes.
+
+## Release
+
+Releases are tag-driven:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The GitHub release workflow validates that the tag matches `project.version`, builds the package, publishes a GitHub Release, and uploads to PyPI.

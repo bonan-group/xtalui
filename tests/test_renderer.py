@@ -298,7 +298,9 @@ def test_bonds_render_as_sticks_between_atoms() -> None:
         cell=np.asarray(atoms.cell.array, dtype=float),
         title="bond",
     )
-    rows = render_ascii(scene, CameraState(orientation=np.eye(3), line_mode="unicode", show_cell=False), Viewport(width=40, height=15))
+    rows = render_ascii(
+        scene, CameraState(orientation=np.eye(3), line_mode="unicode", show_cell=False), Viewport(width=40, height=15)
+    )
     text = "\n".join(rows)
     assert HORIZONTAL_EDGE in text
 
@@ -317,7 +319,11 @@ def test_two_letter_element_labels_render_fully() -> None:
         cell=np.asarray(atoms.cell.array, dtype=float),
         title="labels",
     )
-    rows = render_ascii(scene, CameraState(orientation=np.eye(3), show_cell=False, show_bonds=False, show_labels=True), Viewport(width=20, height=9))
+    rows = render_ascii(
+        scene,
+        CameraState(orientation=np.eye(3), show_cell=False, show_bonds=False, show_labels=True),
+        Viewport(width=20, height=9),
+    )
     assert any("Na" in row for row in rows)
 
 

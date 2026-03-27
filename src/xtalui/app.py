@@ -81,9 +81,7 @@ class ViewerState:
         if self.repeat != self.initial_repeat:
             self.repeat = self.initial_repeat
             self.reload_scene()
-        self.status_message = (
-            f"view reset; repeat={self.repeat[0]}x{self.repeat[1]}x{self.repeat[2]}"
-        )
+        self.status_message = f"view reset; repeat={self.repeat[0]}x{self.repeat[1]}x{self.repeat[2]}"
 
     def render(self, width: int, height: int) -> str:
         body_height = max(height - INFO_PANEL_LINES - 2, 1)
@@ -143,9 +141,7 @@ class ViewerState:
     def help_text(self) -> str:
         if not self.camera.show_help:
             return ""
-        return (
-            "Arrows rotate | x/y/z align view | r123 repeat | Ctrl-R reset | 1 abc panel | 2 xyz panel | m mode | S-Arrows pan | +/- zoom | b bonds | c cell | l labels | Esc cancel cmd | ? help | q quit"
-        )
+        return "Arrows rotate | x/y/z align view | r123 repeat | Ctrl-R reset | 1 abc panel | 2 xyz panel | m mode | S-Arrows pan | +/- zoom | b bonds | c cell | l labels | Esc cancel cmd | ? help | q quit"
 
 
 def element_legend(scene) -> str:
@@ -240,7 +236,9 @@ def lattice_direction_endpoints(
     height: int = AXIS_WIDGET_HEIGHT,
 ) -> list[tuple[str, float, float, float]]:
     cell_array = cell if cell is not None else ()
-    vectors = [vector for vector in cell_array if len(vector) == 3 and any(abs(component) > 1e-12 for component in vector)]
+    vectors = [
+        vector for vector in cell_array if len(vector) == 3 and any(abs(component) > 1e-12 for component in vector)
+    ]
     if not vectors:
         vectors = [(1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)]
     return direction_endpoints(vectors, ("a", "b", "c"), camera, width, height)
@@ -324,11 +322,17 @@ def _render_direction_widget(
     return "\n".join("".join(row) for row in buffer)
 
 
-def render_lattice_direction_widget(cell, camera: CameraState, width: int = AXIS_WIDGET_WIDTH, height: int = AXIS_WIDGET_HEIGHT) -> str:
-    return _render_direction_widget(" abc dirs ", lattice_direction_endpoints(cell, camera, width, height), width, height)
+def render_lattice_direction_widget(
+    cell, camera: CameraState, width: int = AXIS_WIDGET_WIDTH, height: int = AXIS_WIDGET_HEIGHT
+) -> str:
+    return _render_direction_widget(
+        " abc dirs ", lattice_direction_endpoints(cell, camera, width, height), width, height
+    )
 
 
-def render_cartesian_direction_widget(camera: CameraState, width: int = AXIS_WIDGET_WIDTH, height: int = AXIS_WIDGET_HEIGHT) -> str:
+def render_cartesian_direction_widget(
+    camera: CameraState, width: int = AXIS_WIDGET_WIDTH, height: int = AXIS_WIDGET_HEIGHT
+) -> str:
     return _render_direction_widget(" xyz dirs ", cartesian_direction_endpoints(camera, width, height), width, height)
 
 

@@ -57,7 +57,9 @@ def test_lattice_direction_widget_uses_braille_for_vector_shafts() -> None:
 
 
 def test_lattice_direction_widget_preserves_foreshortening() -> None:
-    identity = dict((label, (x, y)) for label, x, y, _ in lattice_direction_endpoints(np.eye(3), CameraState(orientation=np.eye(3))))
+    identity = dict(
+        (label, (x, y)) for label, x, y, _ in lattice_direction_endpoints(np.eye(3), CameraState(orientation=np.eye(3)))
+    )
     rotated = dict(
         (label, (x, y))
         for label, x, y, _ in lattice_direction_endpoints(
@@ -107,7 +109,9 @@ def test_cartesian_direction_widget_changes_with_rotation() -> None:
 
 
 def test_cartesian_direction_widget_preserves_foreshortening() -> None:
-    identity = dict((label, (x, y)) for label, x, y, _ in cartesian_direction_endpoints(CameraState(orientation=np.eye(3))))
+    identity = dict(
+        (label, (x, y)) for label, x, y, _ in cartesian_direction_endpoints(CameraState(orientation=np.eye(3)))
+    )
     rotated = dict(
         (label, (x, y))
         for label, x, y, _ in cartesian_direction_endpoints(

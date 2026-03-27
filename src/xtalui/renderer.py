@@ -60,7 +60,9 @@ class ProjectedSegment:
     priority: int
 
 
-def _project_coords(point: np.ndarray, viewport: Viewport, scale: float, camera: CameraState, aspect_ratio: float) -> tuple[float, float, float]:
+def _project_coords(
+    point: np.ndarray, viewport: Viewport, scale: float, camera: CameraState, aspect_ratio: float
+) -> tuple[float, float, float]:
     x = point[0] * scale * aspect_ratio + camera.pan_x
     y = point[1] * scale + camera.pan_y
     z = point[2]
@@ -69,7 +71,9 @@ def _project_coords(point: np.ndarray, viewport: Viewport, scale: float, camera:
     return screen_x, screen_y, z
 
 
-def _project_point(point: np.ndarray, viewport: Viewport, scale: float, camera: CameraState, aspect_ratio: float) -> tuple[int, int, float]:
+def _project_point(
+    point: np.ndarray, viewport: Viewport, scale: float, camera: CameraState, aspect_ratio: float
+) -> tuple[int, int, float]:
     screen_x, screen_y, z = _project_coords(point, viewport, scale, camera, aspect_ratio)
     screen_x = int(round(screen_x))
     screen_y = int(round(screen_y))
@@ -245,13 +249,17 @@ def _braille_line_rows(width: int, height: int, segments: list[ProjectedSegment]
     return rows
 
 
-def build_primitives(scene: SceneData, camera: CameraState, viewport: Viewport, options: RenderOptions | None = None) -> list[RenderPrimitive]:
+def build_primitives(
+    scene: SceneData, camera: CameraState, viewport: Viewport, options: RenderOptions | None = None
+) -> list[RenderPrimitive]:
     options = options or RenderOptions()
     atoms, segments = _project_scene(scene, camera, viewport, options)
     return atoms + _unicode_line_primitives(segments)
 
 
-def render_ascii(scene: SceneData, camera: CameraState, viewport: Viewport, options: RenderOptions | None = None) -> list[str]:
+def render_ascii(
+    scene: SceneData, camera: CameraState, viewport: Viewport, options: RenderOptions | None = None
+) -> list[str]:
     options = options or RenderOptions()
     width = max(viewport.width, 1)
     height = max(viewport.height, 1)
