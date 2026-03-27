@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from atomtui.cli import build_parser
+from xtalui.cli import build_parser
 
 
 def test_cli_repeat_args() -> None:

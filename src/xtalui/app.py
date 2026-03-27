@@ -11,8 +11,8 @@ from prompt_toolkit.layout import ConditionalContainer, HSplit, Layout, VSplit, 
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.layout.controls import FormattedTextControl
 
-from atomtui.renderer import BRAILLE_BASE, BRAILLE_DOTS, Viewport, render_ascii
-from atomtui.scene import (
+from xtalui.renderer import BRAILLE_BASE, BRAILLE_DOTS, Viewport, render_ascii
+from xtalui.scene import (
     CameraState,
     cycle_line_mode,
     load_structure,
@@ -33,9 +33,57 @@ AXIS_ASPECT_RATIO = 1.0
 
 class ViewerState:
     def __init__(self, path: Path, repeat: tuple[int, int, int], show_cell: bool, symprec: float) -> None:
-        self.scene = load_structure(path, repeat)
-        self.info = structure_info(self.scene, symprec=symprec)
+        self.path = path
+        self.initial_repeat = tuple(int(value) for value in repeat)
+        self.repeat = self.initial_repeat
+        self.symprec = symprec
         self.camera = CameraState(show_cell=show_cell)
+        self.pending_repeat_command: str | None = None
+        self.status_message = ""
+        self.scene = load_structure(path, self.repeat)
+        self.info = structure_info(self.scene, symprec=symprec)
+
+    def reload_scene(self) -> None:
+        self.scene = load_structure(self.path, self.repeat)
+        self.info = structure_info(self.scene, symprec=self.symprec)
+
+    def begin_repeat_command(self) -> None:
+        self.pending_repeat_command = ""
+        self.status_message = "repeat: type rXYZ, for example r222"
+
+    def cancel_repeat_command(self) -> None:
+        self.pending_repeat_command = None
+        self.status_message = "repeat command cancelled"
+
+    def append_repeat_digit(self, digit: str) -> None:
+        if self.pending_repeat_command is None:
+            return
+        if digit not in "123456789":
+            self.status_message = "repeat digits must be in 1..9"
+            return
+        self.pending_repeat_command += digit
+        if len(self.pending_repeat_command) < 3:
+            return
+        self.repeat = tuple(int(value) for value in self.pending_repeat_command[:3])
+        self.pending_repeat_command = None
+        self.reload_scene()
+        self.status_message = f"repeat set to {self.repeat[0]}x{self.repeat[1]}x{self.repeat[2]}"
+
+    def repeat_prompt(self) -> str:
+        if self.pending_repeat_command is None:
+            return ""
+        digits = self.pending_repeat_command.ljust(3, "_")
+        return f"cmd=r{digits}"
+
+    def reset_viewer(self) -> None:
+        self.camera = reset_camera(self.camera)
+        self.pending_repeat_command = None
+        if self.repeat != self.initial_repeat:
+            self.repeat = self.initial_repeat
+            self.reload_scene()
+        self.status_message = (
+            f"view reset; repeat={self.repeat[0]}x{self.repeat[1]}x{self.repeat[2]}"
+        )
 
     def render(self, width: int, height: int) -> str:
         body_height = max(height - INFO_PANEL_LINES - 2, 1)
@@ -75,7 +123,8 @@ class ViewerState:
         )
 
     def status(self) -> str:
-        return (
+        parts = [
+            f"repeat={self.repeat[0]}x{self.repeat[1]}x{self.repeat[2]}",
             f"zoom={self.camera.zoom:.2f}  "
             f"pan=({self.camera.pan_x:.1f}, {self.camera.pan_y:.1f})  "
             f"mode={self.camera.line_mode}  "
@@ -83,14 +132,19 @@ class ViewerState:
             f"xyz={'on' if self.camera.show_xyz_panel else 'off'}  "
             f"cell={'on' if self.camera.show_cell else 'off'}  "
             f"bonds={'on' if self.camera.show_bonds else 'off'}  "
-            f"labels={'on' if self.camera.show_labels else 'off'}"
-        )
+            f"labels={'on' if self.camera.show_labels else 'off'}",
+        ]
+        if self.pending_repeat_command is not None:
+            parts.append(self.repeat_prompt())
+        if self.status_message:
+            parts.append(self.status_message)
+        return "  ".join(parts)
 
     def help_text(self) -> str:
         if not self.camera.show_help:
             return ""
         return (
-            "Arrows rotate | x/y/z align view | 1 abc panel | 2 xyz panel | m mode | S-Arrows pan | +/- zoom | b bonds | c cell | l labels | r reset | ? help | q quit"
+            "Arrows rotate | x/y/z align view | r123 repeat | Ctrl-R reset | 1 abc panel | 2 xyz panel | m mode | S-Arrows pan | +/- zoom | b bonds | c cell | l labels | Esc cancel cmd | ? help | q quit"
         )
 
 
@@ -367,6 +421,44 @@ def build_application(state: ViewerState) -> Application:
         state.camera = with_zoom(state.camera, 0.9)
         event.app.invalidate()
 
+    @bindings.add("r")
+    def _begin_repeat(event) -> None:
+        state.begin_repeat_command()
+        event.app.invalidate()
+
+    @bindings.add("c-r")
+    def _reset(event) -> None:
+        state.reset_viewer()
+        event.app.invalidate()
+
+    @bindings.add("escape", filter=Condition(lambda: state.pending_repeat_command is not None))
+    def _cancel_repeat(event) -> None:
+        state.cancel_repeat_command()
+        event.app.invalidate()
+
+    @bindings.add("backspace", filter=Condition(lambda: state.pending_repeat_command is not None))
+    def _repeat_backspace(event) -> None:
+        if not state.pending_repeat_command:
+            state.cancel_repeat_command()
+        else:
+            state.pending_repeat_command = state.pending_repeat_command[:-1]
+            state.status_message = "repeat: type rXYZ, for example r222"
+        event.app.invalidate()
+
+    def _append_repeat_digit_if_active(digit: str) -> bool:
+        if state.pending_repeat_command is None:
+            return False
+        state.append_repeat_digit(digit)
+        return True
+
+    @bindings.add("<any>", filter=Condition(lambda: state.pending_repeat_command is not None))
+    def _repeat_digits(event) -> None:
+        key = event.key_sequence[0].key
+        if key is None:
+            return
+        state.append_repeat_digit(key)
+        event.app.invalidate()
+
     @bindings.add("c")
     def _toggle_cell(event) -> None:
         state.camera = toggle_flag(state.camera, "show_cell")
@@ -384,11 +476,17 @@ def build_application(state: ViewerState) -> Application:
 
     @bindings.add("1")
     def _toggle_abc_panel(event) -> None:
+        if _append_repeat_digit_if_active("1"):
+            event.app.invalidate()
+            return
         state.camera = toggle_flag(state.camera, "show_abc_panel")
         event.app.invalidate()
 
     @bindings.add("2")
     def _toggle_xyz_panel(event) -> None:
+        if _append_repeat_digit_if_active("2"):
+            event.app.invalidate()
+            return
         state.camera = toggle_flag(state.camera, "show_xyz_panel")
         event.app.invalidate()
 
@@ -400,11 +498,6 @@ def build_application(state: ViewerState) -> Application:
     @bindings.add("?")
     def _toggle_help(event) -> None:
         state.camera = toggle_flag(state.camera, "show_help")
-        event.app.invalidate()
-
-    @bindings.add("r")
-    def _reset(event) -> None:
-        state.camera = reset_camera(state.camera)
         event.app.invalidate()
 
     @bindings.add("x")

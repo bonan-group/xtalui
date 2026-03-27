@@ -4,9 +4,10 @@ from pathlib import Path
 
 import numpy as np
 from ase import Atoms
+from ase.build import bulk
 from ase.io import write
 
-from atomtui.renderer import (
+from xtalui.renderer import (
     BRAILLE_BASE,
     DIAGONAL_ASC_EDGE,
     DIAGONAL_DESC_EDGE,
@@ -20,7 +21,7 @@ from atomtui.renderer import (
     build_primitives,
     render_ascii,
 )
-from atomtui.scene import (
+from xtalui.scene import (
     CameraState,
     SceneData,
     load_structure,
@@ -201,6 +202,19 @@ def test_bond_segments_are_detected_for_neighboring_atoms() -> None:
     )
     segments = transformed_bond_segments(scene, CameraState(orientation=np.eye(3), show_cell=False))
     assert len(segments) == 1
+
+
+def test_bond_segments_are_detected_for_periodic_silicon() -> None:
+    atoms = bulk("Si", "diamond", a=5.431, cubic=True)
+    scene = SceneData(
+        atoms=atoms,
+        positions=np.asarray(atoms.get_positions(), dtype=float),
+        symbols=list(atoms.get_chemical_symbols()),
+        cell=np.asarray(atoms.cell.array, dtype=float),
+        title="silicon",
+    )
+    segments = transformed_bond_segments(scene, CameraState(orientation=np.eye(3), show_cell=False))
+    assert len(segments) == 16
 
 
 def test_bonds_render_as_sticks_between_atoms() -> None:

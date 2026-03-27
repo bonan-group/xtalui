@@ -3,16 +3,18 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "atomtui"
+name = "xtalui"
 version = "0.1.0"
 description = "Terminal crystal structure viewer with ASCII rendering"
 readme = "README.md"
 requires-python = ">=3.10"
+license = {file = "LICENSE"}
 keywords = ["ase", "ascii", "chemistry", "crystal", "terminal", "tui"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
     "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Topic :: Scientific/Engineering :: Chemistry",
@@ -30,7 +32,7 @@ dependencies = [
 dev = ["pytest>=8.0"]
 
 [project.scripts]
-atomtui = "atomtui.cli:main"
+xtal = "xtalui.cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

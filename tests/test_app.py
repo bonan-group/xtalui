@@ -3,18 +3,21 @@ from __future__ import annotations
 import numpy as np
 
 from ase import Atoms
+from ase.build import bulk
+from ase.io import write
 
-from atomtui.app import (
+from xtalui.app import (
     AXIS_WIDGET_HEIGHT,
     AXIS_WIDGET_WIDTH,
+    ViewerState,
     cartesian_direction_endpoints,
     element_legend,
     lattice_direction_endpoints,
     render_cartesian_direction_widget,
     render_lattice_direction_widget,
 )
-from atomtui.renderer import BRAILLE_BASE
-from atomtui.scene import CameraState, SceneData, cycle_line_mode
+from xtalui.renderer import BRAILLE_BASE
+from xtalui.scene import CameraState, SceneData, cycle_line_mode
 
 
 def test_lattice_direction_widget_contains_axis_labels() -> None:
@@ -155,3 +158,53 @@ def test_camera_defaults_show_both_direction_panels() -> None:
     camera = CameraState()
     assert camera.show_abc_panel is True
     assert camera.show_xyz_panel is True
+
+
+def test_repeat_command_updates_scene_and_status(tmp_path) -> None:
+    path = tmp_path / "si.cif"
+    write(path, bulk("Si", "diamond", a=5.431, cubic=True))
+    state = ViewerState(path=path, repeat=(1, 1, 1), show_cell=True, symprec=1e-5)
+
+    initial_atoms = len(state.scene.atoms)
+    state.begin_repeat_command()
+    state.append_repeat_digit("2")
+    state.append_repeat_digit("2")
+    state.append_repeat_digit("2")
+
+    assert state.repeat == (2, 2, 2)
+    assert state.pending_repeat_command is None
+    assert len(state.scene.atoms) == initial_atoms * 8
+    assert "repeat=2x2x2" in state.status()
+    assert "repeat set to 2x2x2" in state.status()
+
+
+def test_repeat_command_rejects_zero_digit(tmp_path) -> None:
+    path = tmp_path / "al.cif"
+    write(path, bulk("Al", "fcc", a=4.05, cubic=True))
+    state = ViewerState(path=path, repeat=(1, 1, 1), show_cell=True, symprec=1e-5)
+
+    state.begin_repeat_command()
+    state.append_repeat_digit("0")
+
+    assert state.repeat == (1, 1, 1)
+    assert state.pending_repeat_command == ""
+    assert "repeat digits must be in 1..9" in state.status()
+
+
+def test_reset_viewer_restores_initial_repeat(tmp_path) -> None:
+    path = tmp_path / "si.cif"
+    write(path, bulk("Si", "diamond", a=5.431, cubic=True))
+    state = ViewerState(path=path, repeat=(2, 1, 1), show_cell=True, symprec=1e-5)
+
+    state.begin_repeat_command()
+    state.append_repeat_digit("3")
+    state.append_repeat_digit("1")
+    state.append_repeat_digit("1")
+    assert state.repeat == (3, 1, 1)
+
+    state.reset_viewer()
+
+    assert state.repeat == (2, 1, 1)
+    assert state.pending_repeat_command is None
+    assert "repeat=2x1x1" in state.status()
+    assert "view reset" in state.status()

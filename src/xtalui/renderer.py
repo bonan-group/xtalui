@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from atomtui.scene import (
+from xtalui.scene import (
     CameraState,
     RenderOptions,
     RenderPrimitive,

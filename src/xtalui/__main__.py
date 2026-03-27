@@ -1,4 +1,4 @@
-from atomtui.cli import main
+from xtalui.cli import main
 
 
 if __name__ == "__main__":

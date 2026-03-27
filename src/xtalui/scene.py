@@ -243,22 +243,25 @@ def transformed_cell_axis_labels(scene: SceneData, camera: CameraState) -> list[
 def transformed_bond_segments(scene: SceneData, camera: CameraState, cutoff_scale: float = 1.0) -> list[tuple[np.ndarray, np.ndarray]]:
     if len(scene.positions) < 2:
         return []
-    atoms = scene.atoms.copy()
-    atoms.pbc = False
-    # ASE natural_cutoffs() uses covalent radii as the baseline bond rule.
-    cutoffs = natural_cutoffs(atoms, mult=cutoff_scale)
-    indices_i, indices_j = neighbor_list("ij", atoms, cutoffs)
+    # Match ASE GUI bond detection: periodic neighbor list with a 1.5x
+    # covalent-radii cutoff.
+    cutoffs = natural_cutoffs(scene.atoms, mult=1.5 * cutoff_scale)
+    indices_i, indices_j, offsets = neighbor_list("ijS", scene.atoms, cutoffs)
     positions = centered_positions(scene)
     segments: list[tuple[np.ndarray, np.ndarray]] = []
-    seen_pairs: set[tuple[int, int]] = set()
-    for i, j in zip(indices_i, indices_j):
+    seen_pairs: set[tuple[int, int, tuple[int, int, int]]] = set()
+    for i, j, offset in zip(indices_i, indices_j, offsets):
         if i == j:
             continue
-        pair = (int(min(i, j)), int(max(i, j)))
-        if pair in seen_pairs:
+        offset_tuple = tuple(int(value) for value in offset)
+        pair = (int(i), int(j), offset_tuple)
+        reverse_pair = (int(j), int(i), tuple(-value for value in offset_tuple))
+        if reverse_pair in seen_pairs:
             continue
         seen_pairs.add(pair)
-        segments.append((positions[pair[0]] @ camera.orientation.T, positions[pair[1]] @ camera.orientation.T))
+        start = positions[int(i)]
+        end = positions[int(j)] + np.dot(offset, scene.cell)
+        segments.append((start @ camera.orientation.T, end @ camera.orientation.T))
     return segments
 
 

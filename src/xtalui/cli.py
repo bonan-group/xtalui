@@ -3,11 +3,11 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from atomtui.app import run_viewer
+from xtalui.app import run_viewer
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="atomtui", description="Render an atomic structure directly in the terminal.")
+    parser = argparse.ArgumentParser(prog="xtal", description="Render an atomic structure directly in the terminal.")
     parser.add_argument("path", type=Path, help="Path to a structure file")
     parser.add_argument(
         "--repeat",
