@@ -8,6 +8,8 @@ from ase import Atoms
 from ase.io import read
 from ase.neighborlist import natural_cutoffs, neighbor_list
 
+from xtalui.abacus_stru import looks_like_abacus_stru, read_abacus_stru
+
 try:
     import spglib
 except ImportError:  # pragma: no cover - exercised in integration, not unit tests
@@ -70,9 +72,12 @@ class RenderPrimitive:
 
 
 def load_structure(path: Path, repeat: tuple[int, int, int] = (1, 1, 1)) -> SceneData:
-    atoms = read(path)
-    if isinstance(atoms, list):
-        atoms = atoms[0]
+    if looks_like_abacus_stru(path):
+        atoms = read_abacus_stru(path)
+    else:
+        atoms = read(path)
+        if isinstance(atoms, list):
+            atoms = atoms[0]
     if repeat != (1, 1, 1):
         atoms = atoms.repeat(repeat)
     positions = np.asarray(atoms.get_positions(), dtype=float)

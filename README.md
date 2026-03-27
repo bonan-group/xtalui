@@ -2,6 +2,8 @@
 
 `xtalui` is a terminal-first crystal structure viewer for atomistic and crystalline structures.
 
+![xtalui demo](xtalui.gif)
+
 It renders structures directly in the terminal using:
 
 - Unicode and Braille line rendering for cell edges and bonds
@@ -12,6 +14,7 @@ It renders structures directly in the terminal using:
 ## Features
 
 - Load structures through ASE
+- Load self-contained ABACUS `STRU` files with explicit `LATTICE_VECTORS`
 - Show atoms, bonds, and the unit cell in the terminal
 - Display chemical formula, lattice vectors, cell lengths and angles, volume, and space group
 - Show both lattice-frame `a/b/c` and Cartesian `x/y/z` direction widgets
@@ -20,32 +23,55 @@ It renders structures directly in the terminal using:
 
 ## Installation
 
+Recommended for daily use: install `xtal` as a standalone `uv` tool so it is not tied to a project virtual environment.
+
+From a local checkout:
+
 ```bash
-UV_CACHE_DIR=/tmp/uv-cache uv venv --python /usr/bin/python3 .venv
-UV_CACHE_DIR=/tmp/uv-cache uv sync --dev
+uv tool install --editable .
+```
+
+If `xtal` is not yet on your `PATH`, run:
+
+```bash
+uv tool update-shell
+```
+
+Then you can launch the viewer directly:
+
+```bash
+xtal examples/silicon_diamond.cif
+```
+
+For development work inside the repository:
+
+```bash
+uv venv --python /usr/bin/python3 .venv
+uv sync --dev
 ```
 
 You can also run it without activating the environment:
 
 ```bash
-UV_CACHE_DIR=/tmp/uv-cache uv run xtal --help
-UV_CACHE_DIR=/tmp/uv-cache uv run python -m xtalui --help
+uv run xtal --help
+uv run python -m xtalui --help
 ```
 
 ## Usage
 
 ```bash
-UV_CACHE_DIR=/tmp/uv-cache uv run xtal structure.cif
-UV_CACHE_DIR=/tmp/uv-cache uv run xtal POSCAR --repeat 2 2 1
-UV_CACHE_DIR=/tmp/uv-cache uv run xtal structure.cif --symprec 1e-3
+uv run xtal structure.cif
+uv run xtal POSCAR --repeat 2 2 1
+uv run xtal structure.cif --symprec 1e-3
+uv run xtal STRU
 ```
 
 The repository also ships with generated sample structures:
 
 ```bash
-UV_CACHE_DIR=/tmp/uv-cache uv run xtal examples/silicon_diamond.cif
-UV_CACHE_DIR=/tmp/uv-cache uv run xtal examples/gaas_zincblende.cif
-UV_CACHE_DIR=/tmp/uv-cache uv run xtal examples/graphite_hexagonal.cif
+uv run xtal examples/silicon_diamond.cif
+uv run xtal examples/gaas_zincblende.cif
+uv run xtal examples/graphite_hexagonal.cif
 ```
 
 ## CLI Options
@@ -80,5 +106,7 @@ UV_CACHE_DIR=/tmp/uv-cache uv run xtal examples/graphite_hexagonal.cif
 - The Python package name is `xtalui`, while the installed CLI command is `xtal`.
 - Space-group detection uses `spglib` through ASE-compatible structure data.
 - Bond detection follows the ASE GUI heuristic: a periodic neighbor list with a `1.5x` covalent-radius cutoff.
+- ABACUS `STRU` support is built in for files that include explicit `LATTICE_VECTORS`.
+- `STRU` files that rely on `LATTICE_PARAMETER(S)` plus `latname` from a separate `INPUT` file are not supported.
 - Braille mode is the default line renderer because it provides smoother terminal line quality.
 - Example CIF files in [`examples/`](/home/bonan/appdir/atomtui/examples) are generated with ASE for common crystal prototypes.

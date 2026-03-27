@@ -6,6 +6,7 @@ import numpy as np
 from ase import Atoms
 from ase.build import bulk
 from ase.io import write
+from ase.units import Angstrom, Bohr
 
 from xtalui.renderer import (
     BRAILLE_BASE,
@@ -65,6 +66,72 @@ def test_cif_loading(tmp_path: Path) -> None:
     scene = load_structure(path)
     assert scene.positions.shape == (2, 3)
     assert scene.symbols == ["Si", "Si"]
+
+
+def test_abacus_stru_loading_with_direct_coordinates(tmp_path: Path) -> None:
+    path = tmp_path / "STRU"
+    path.write_text(
+        "\n".join(
+            [
+                "ATOMIC_SPECIES",
+                "Si 28.085 Si.upf",
+                "",
+                "LATTICE_CONSTANT",
+                f"{Angstrom / Bohr}",
+                "",
+                "LATTICE_VECTORS",
+                "2.0 0.0 0.0",
+                "0.0 3.0 0.0",
+                "0.0 0.0 4.0",
+                "",
+                "ATOMIC_POSITIONS",
+                "Direct",
+                "",
+                "Si",
+                "0.0",
+                "2",
+                "0.0 0.0 0.0",
+                "0.25 0.5 0.75 m 1 1 1",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    scene = load_structure(path)
+    assert scene.symbols == ["Si", "Si"]
+    assert np.allclose(scene.cell, np.diag([2.0, 3.0, 4.0]))
+    assert np.allclose(scene.positions[1], np.array([0.5, 1.5, 3.0]))
+
+
+def test_abacus_stru_loading_with_centered_cartesian_angstrom(tmp_path: Path) -> None:
+    path = tmp_path / "example.stru"
+    path.write_text(
+        "\n".join(
+            [
+                "ATOMIC_SPECIES",
+                "C 12.011 C.upf",
+                "",
+                "LATTICE_CONSTANT",
+                f"{Angstrom / Bohr}",
+                "",
+                "LATTICE_VECTORS",
+                "4.0 0.0 0.0",
+                "0.0 4.0 0.0",
+                "0.0 0.0 10.0",
+                "",
+                "ATOMIC_POSITIONS",
+                "Cartesian_angstrom_center_xy",
+                "",
+                "C",
+                "0.0",
+                "1",
+                "0.1 -0.2 1.5",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    scene = load_structure(path)
+    assert scene.symbols == ["C"]
+    assert np.allclose(scene.positions[0], np.array([2.1, 1.8, 1.5]))
 
 
 def test_cell_edges_count() -> None:
