@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
@@ -18,6 +19,7 @@ except ImportError:  # pragma: no cover - exercised in integration, not unit tes
 
 AtomPositions = np.ndarray
 Matrix3 = np.ndarray
+StructurePaths = Path | Sequence[Path]
 
 
 @dataclass(frozen=True)
@@ -52,6 +54,8 @@ class CameraState:
     show_cell: bool = True
     show_bonds: bool = True
     show_labels: bool = False
+    show_color: bool = False
+    show_spheres: bool = False
     show_help: bool = False
 
 
@@ -69,19 +73,49 @@ class RenderPrimitive:
     z: float
     char: str
     priority: int
+    style: str = ""
 
 
-def load_structure(path: Path, repeat: tuple[int, int, int] = (1, 1, 1)) -> SceneData:
+def load_structure(paths: StructurePaths, repeat: tuple[int, int, int] = (1, 1, 1)) -> SceneData:
+    return load_structures(paths, repeat)[0]
+
+
+def load_structures(paths: StructurePaths, repeat: tuple[int, int, int] = (1, 1, 1)) -> list[SceneData]:
+    scenes: list[SceneData] = []
+    for path in _normalize_paths(paths):
+        atoms_series = read_structure_series(path)
+        scenes.extend(_scene_from_atoms(_repeat_atoms(atoms, repeat), path.name) for atoms in atoms_series)
+    return scenes
+
+
+def _normalize_paths(paths: StructurePaths) -> tuple[Path, ...]:
+    if isinstance(paths, Path):
+        return (paths,)
+    normalized = tuple(Path(path) for path in paths)
+    if not normalized:
+        raise ValueError("at least one structure path is required")
+    return normalized
+
+
+def read_structure_series(path: Path) -> list[Atoms]:
     if looks_like_abacus_stru(path):
-        atoms = read_abacus_stru(path)
-    else:
-        atoms = read(path)
-        if isinstance(atoms, list):
-            atoms = atoms[0]
-    if repeat != (1, 1, 1):
-        atoms = atoms.repeat(repeat)
+        return [read_abacus_stru(path)]
+    atoms = read(path, index=":")
+    if isinstance(atoms, Atoms):
+        return [atoms]
+    if atoms:
+        return list(atoms)
+    return [read(path)]
+
+
+def _repeat_atoms(atoms: Atoms, repeat: tuple[int, int, int]) -> Atoms:
+    if repeat == (1, 1, 1):
+        return atoms
+    return atoms.repeat(repeat)
+
+
+def _scene_from_atoms(atoms: Atoms, title: str) -> SceneData:
     positions = np.asarray(atoms.get_positions(), dtype=float)
-    title = path.name
     return SceneData(
         atoms=atoms,
         positions=positions,
@@ -145,7 +179,8 @@ def axis_rotation_matrix(axis: str, angle: float) -> Matrix3:
 
 
 def default_orientation() -> Matrix3:
-    return rotation_matrix(-0.6, 0.6)
+    # Isometric default: equal axes in a cubic cell project to equal lengths.
+    return rotation_matrix(-np.pi / 4.0, np.arcsin(np.tan(np.pi / 6.0)))
 
 
 def normalize_orientation(matrix: Matrix3) -> Matrix3:
@@ -182,7 +217,10 @@ def centered_positions(scene: SceneData) -> AtomPositions:
     positions = scene.positions
     if len(positions) == 0:
         return positions
-    center = (positions.min(axis=0) + positions.max(axis=0)) / 2.0
+    if np.any(scene.cell):
+        center = np.sum(scene.cell, axis=0) / 2.0
+    else:
+        center = (positions.min(axis=0) + positions.max(axis=0)) / 2.0
     return positions - center
 
 
@@ -248,14 +286,25 @@ def transformed_cell_axis_labels(scene: SceneData, camera: CameraState) -> list[
 def transformed_bond_segments(
     scene: SceneData, camera: CameraState, cutoff_scale: float = 1.0
 ) -> list[tuple[np.ndarray, np.ndarray]]:
+    records = bond_records(scene, cutoff_scale=cutoff_scale)
+    positions = centered_positions(scene)
+    segments: list[tuple[np.ndarray, np.ndarray]] = []
+    for i, j, _, offset in records:
+        start = positions[i]
+        end = positions[j] + np.dot(offset, scene.cell)
+        segments.append((start @ camera.orientation.T, end @ camera.orientation.T))
+    return segments
+
+
+def bond_records(scene: SceneData, cutoff_scale: float = 1.0) -> list[tuple[int, int, float, tuple[int, int, int]]]:
     if len(scene.positions) < 2:
         return []
     # Match ASE GUI bond detection: periodic neighbor list with a 1.5x
     # covalent-radii cutoff.
     cutoffs = natural_cutoffs(scene.atoms, mult=1.5 * cutoff_scale)
     indices_i, indices_j, offsets = neighbor_list("ijS", scene.atoms, cutoffs)
-    positions = centered_positions(scene)
-    segments: list[tuple[np.ndarray, np.ndarray]] = []
+    positions = scene.positions
+    records: list[tuple[int, int, float, tuple[int, int, int]]] = []
     seen_pairs: set[tuple[int, int, tuple[int, int, int]]] = set()
     for i, j, offset in zip(indices_i, indices_j, offsets):
         if i == j:
@@ -268,8 +317,9 @@ def transformed_bond_segments(
         seen_pairs.add(pair)
         start = positions[int(i)]
         end = positions[int(j)] + np.dot(offset, scene.cell)
-        segments.append((start @ camera.orientation.T, end @ camera.orientation.T))
-    return segments
+        distance = float(np.linalg.norm(end - start))
+        records.append((int(i), int(j), distance, offset_tuple))
+    return records
 
 
 def with_rotation(camera: CameraState, dx: float, dy: float) -> CameraState:

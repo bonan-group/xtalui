@@ -20,12 +20,16 @@ from xtalui.renderer import (
     Viewport,
     _edge_char,
     build_primitives,
+    render_formatted,
     render_ascii,
 )
 from xtalui.scene import (
     CameraState,
     SceneData,
+    bond_records,
+    centered_positions,
     load_structure,
+    load_structures,
     orientation_for_view,
     scene_radius,
     structure_info,
@@ -66,6 +70,32 @@ def test_cif_loading(tmp_path: Path) -> None:
     scene = load_structure(path)
     assert scene.positions.shape == (2, 3)
     assert scene.symbols == ["Si", "Si"]
+
+
+def test_series_loading_applies_repeat_to_all_frames(tmp_path: Path) -> None:
+    atoms_a = bulk("Si", "diamond", a=5.431, cubic=True)
+    atoms_b = bulk("Si", "diamond", a=5.531, cubic=True)
+    path = tmp_path / "series.xyz"
+    write(path, [atoms_a, atoms_b], format="extxyz")
+    scenes = load_structures(path, repeat=(2, 1, 1))
+    assert len(scenes) == 2
+    assert len(scenes[0].atoms) == len(atoms_a) * 2
+    assert len(scenes[1].atoms) == len(atoms_b) * 2
+
+
+def test_multiple_input_paths_are_concatenated_into_one_series(tmp_path: Path) -> None:
+    path_a = tmp_path / "a.cif"
+    path_b = tmp_path / "b.cif"
+    write(path_a, bulk("Al", "fcc", a=4.05, cubic=True))
+    write(path_b, bulk("Cu", "fcc", a=3.615, cubic=True))
+
+    scenes = load_structures([path_a, path_b], repeat=(1, 1, 1))
+
+    assert len(scenes) == 2
+    assert scenes[0].title == "a.cif"
+    assert scenes[1].title == "b.cif"
+    assert scenes[0].atoms.get_chemical_formula() == "Al4"
+    assert scenes[1].atoms.get_chemical_formula() == "Cu4"
 
 
 def test_abacus_stru_loading_with_direct_coordinates(tmp_path: Path) -> None:
@@ -148,6 +178,74 @@ def test_zoom_changes_projection_density() -> None:
     assert max(item.x for item in zoomed) >= max(item.x for item in base)
 
 
+def test_sphere_mode_renders_atoms_with_multiple_primitives() -> None:
+    atoms = Atoms(
+        symbols=["Si"],
+        positions=[[0.0, 0.0, 0.0]],
+        cell=np.zeros((3, 3)),
+        pbc=False,
+    )
+    scene = SceneData(
+        atoms=atoms,
+        positions=np.asarray(atoms.get_positions(), dtype=float),
+        symbols=list(atoms.get_chemical_symbols()),
+        cell=np.asarray(atoms.cell.array, dtype=float),
+        title="sphere",
+    )
+    viewport = Viewport(width=40, height=20)
+
+    primitives = build_primitives(scene, CameraState(show_spheres=True, show_bonds=False, show_cell=False), viewport)
+
+    assert len(primitives) > 1
+
+
+def test_sphere_mode_uses_constant_glyph_in_unicode_mode() -> None:
+    atoms = Atoms(
+        symbols=["C", "O"],
+        positions=[[0.0, 0.0, -1.0], [2.5, 0.0, 1.0]],
+        cell=np.zeros((3, 3)),
+        pbc=False,
+    )
+    scene = SceneData(
+        atoms=atoms,
+        positions=np.asarray(atoms.get_positions(), dtype=float),
+        symbols=list(atoms.get_chemical_symbols()),
+        cell=np.asarray(atoms.cell.array, dtype=float),
+        title="sphere-unicode",
+    )
+    primitives = build_primitives(
+        scene,
+        CameraState(show_spheres=True, show_bonds=False, show_cell=False, line_mode="unicode"),
+        Viewport(width=40, height=20),
+    )
+
+    sphere_chars = {primitive.char for primitive in primitives if primitive.priority == 17}
+    assert sphere_chars == {"●"}
+
+
+def test_sphere_mode_uses_braille_in_braille_mode() -> None:
+    atoms = Atoms(
+        symbols=["Si"],
+        positions=[[0.0, 0.0, 0.0]],
+        cell=np.zeros((3, 3)),
+        pbc=False,
+    )
+    scene = SceneData(
+        atoms=atoms,
+        positions=np.asarray(atoms.get_positions(), dtype=float),
+        symbols=list(atoms.get_chemical_symbols()),
+        cell=np.asarray(atoms.cell.array, dtype=float),
+        title="sphere-braille",
+    )
+    rows = render_ascii(
+        scene,
+        CameraState(show_spheres=True, show_bonds=False, show_cell=False, line_mode="braille"),
+        Viewport(width=40, height=20),
+    )
+
+    assert any(any(ord(char) >= BRAILLE_BASE for char in row if char.strip()) for row in rows)
+
+
 def test_nearer_atom_wins_depth_buffer() -> None:
     atoms = Atoms(
         symbols=["C", "O"],
@@ -219,6 +317,22 @@ def test_view_along_sets_camera_to_axis_aligned_orientation() -> None:
     assert positions.shape == scene.positions.shape
 
 
+def test_periodic_structures_are_centered_by_cell_not_atom_bbox() -> None:
+    atoms = bulk("Al", "fcc", a=4.05, cubic=True)
+    scene = SceneData(
+        atoms=atoms,
+        positions=np.asarray(atoms.get_positions(), dtype=float),
+        symbols=list(atoms.get_chemical_symbols()),
+        cell=np.asarray(atoms.cell.array, dtype=float),
+        title="al",
+    )
+
+    centered = centered_positions(scene)
+
+    assert np.allclose(centered[0], np.array([-2.025, -2.025, -2.025]))
+    assert np.allclose(centered[1], np.array([-2.025, 0.0, 0.0]))
+
+
 def test_cube_projection_respects_terminal_character_aspect_ratio() -> None:
     atoms = Atoms(cell=np.diag([4.0, 4.0, 4.0]), pbc=True)
     scene = SceneData(
@@ -269,6 +383,9 @@ def test_bond_segments_are_detected_for_neighboring_atoms() -> None:
     )
     segments = transformed_bond_segments(scene, CameraState(orientation=np.eye(3), show_cell=False))
     assert len(segments) == 1
+    records = bond_records(scene)
+    assert len(records) == 1
+    assert abs(records[0][2] - 1.45) < 1e-8
 
 
 def test_bond_segments_are_detected_for_periodic_silicon() -> None:
@@ -410,3 +527,36 @@ def test_cell_display_includes_origin_and_abc_axis_labels() -> None:
     assert "c" in text
     assert "b" in text
     assert "c" in text
+
+
+def test_toggling_cell_visibility_does_not_change_projected_atom_scale() -> None:
+    atoms = bulk("Si", "diamond", a=5.431, cubic=True)
+    scene = SceneData(
+        atoms=atoms,
+        positions=np.asarray(atoms.get_positions(), dtype=float),
+        symbols=list(atoms.get_chemical_symbols()),
+        cell=np.asarray(atoms.cell.array, dtype=float),
+        title="silicon",
+    )
+    viewport = Viewport(width=80, height=32)
+    camera_with_cell = view_along(CameraState(show_cell=True, show_bonds=False), "z")
+    camera_without_cell = view_along(CameraState(show_cell=False, show_bonds=False), "z")
+
+    with_cell = [
+        primitive for primitive in build_primitives(scene, camera_with_cell, viewport) if primitive.priority >= 20
+    ]
+    without_cell = [
+        primitive for primitive in build_primitives(scene, camera_without_cell, viewport) if primitive.priority >= 20
+    ]
+
+    with_cell_span = max(primitive.x for primitive in with_cell) - min(primitive.x for primitive in with_cell)
+    without_cell_span = max(primitive.x for primitive in without_cell) - min(primitive.x for primitive in without_cell)
+
+    assert with_cell_span == without_cell_span
+
+
+def test_color_mode_emits_styled_fragments_for_atoms() -> None:
+    scene = make_scene()
+    fragments = render_formatted(scene, CameraState(show_color=True, show_bonds=False), Viewport(width=40, height=15))
+
+    assert any(style.startswith("fg:#") for style, text in fragments if text.strip())

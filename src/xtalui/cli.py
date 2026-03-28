@@ -8,7 +8,7 @@ from xtalui.app import run_viewer
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="xtal", description="Render an atomic structure directly in the terminal.")
-    parser.add_argument("path", type=Path, help="Path to a structure file")
+    parser.add_argument("paths", type=Path, nargs="+", help="Path(s) to structure files")
     parser.add_argument(
         "--repeat",
         metavar=("NX", "NY", "NZ"),
@@ -28,13 +28,24 @@ def build_parser() -> argparse.ArgumentParser:
         default=1e-5,
         help="Symmetry tolerance passed to spglib for space-group detection",
     )
+    parser.add_argument(
+        "--color",
+        action="store_true",
+        help="Start with element colors enabled",
+    )
     return parser
 
 
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
-    run_viewer(args.path, tuple(args.repeat), show_cell=not args.hide_cell, symprec=args.symprec)
+    run_viewer(
+        args.paths,
+        tuple(args.repeat),
+        show_cell=not args.hide_cell,
+        symprec=args.symprec,
+        show_color=args.color,
+    )
 
 
 if __name__ == "__main__":
