@@ -70,7 +70,6 @@ jobs:
         shell: bash
         run: |
           uv venv .smoke-venv
-          source .smoke-venv/bin/activate
-          python -m pip install dist/*.whl
-          xtal --help
-          python -m xtalui --help
+          uv pip install --python .smoke-venv/bin/python dist/*.whl
+          .smoke-venv/bin/xtal --help
+          .smoke-venv/bin/python -m xtalui --help
