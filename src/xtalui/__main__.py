@@ -1,3 +1,5 @@
+"""Run the xtalui CLI with `python -m xtalui`."""
+
 from xtalui.cli import main
 
 

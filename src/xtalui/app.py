@@ -1,3 +1,5 @@
+"""Interactive prompt_toolkit application for the terminal structure viewer."""
+
 from __future__ import annotations
 
 import asyncio
@@ -18,6 +20,8 @@ from xtalui.renderer import BRAILLE_BASE, BRAILLE_DOTS, Viewport, render_ascii, 
 from xtalui.scene import (
     CameraState,
     RenderOptions,
+    SceneData,
+    StructureInfo,
     bond_records,
     cycle_line_mode,
     load_structures,
@@ -42,9 +46,14 @@ FRAME_PLAY_INTERVAL = 0.25
 ASPECT_RATIO_STEP = 0.1
 ASPECT_RATIO_MIN = 0.5
 ASPECT_RATIO_MAX = 4.0
+DirectionEndpoint = tuple[str, float, float, float]
+TextFragment = tuple[str, str]
+VectorLike = Sequence[float] | np.ndarray
 
 
 class ViewerState:
+    """Mutable runtime state for the interactive viewer session."""
+
     def __init__(
         self,
         paths: Sequence[str | Path],
@@ -54,9 +63,9 @@ class ViewerState:
         show_color: bool,
         image_number: str = ":",
     ) -> None:
-        self.paths = tuple(paths)
+        self.paths: tuple[str | Path, ...] = tuple(paths)
         self.image_number = image_number
-        self.initial_repeat = tuple(int(value) for value in repeat)
+        self.initial_repeat: tuple[int, int, int] = tuple(int(value) for value in repeat)
         self.repeat = self.initial_repeat
         self.symprec = symprec
         self.camera = CameraState(show_cell=show_cell, show_color=show_color)
@@ -72,16 +81,20 @@ class ViewerState:
         self.bond_scroll = 0
         self._next_frame_time = 0.0
         self.frame_index = 0
-        self.scenes: list = []
-        self.infos: list = []
+        self.scenes: list[SceneData] = []
+        self.infos: list[StructureInfo] = []
         self.reload_scene()
 
     @property
-    def scene(self):
+    def scene(self) -> SceneData:
+        """Return the currently visible frame."""
+
         return self.scenes[self.frame_index]
 
     @property
-    def info(self):
+    def info(self) -> StructureInfo:
+        """Return display metadata for the current frame."""
+
         return self.infos[self.frame_index]
 
     @property
@@ -89,6 +102,8 @@ class ViewerState:
         return len(self.scenes)
 
     def reload_scene(self) -> None:
+        """Reload structures after repeat or input changes."""
+
         self.scenes = load_structures(self.paths, self.repeat, image_number=self.image_number)
         self.infos = [structure_info(scene, symprec=self.symprec) for scene in self.scenes]
         self.frame_index = min(self.frame_index, len(self.scenes) - 1)
@@ -183,7 +198,7 @@ class ViewerState:
         )
         return "\n".join(rows)
 
-    def render_formatted(self, width: int, height: int):
+    def render_formatted(self, width: int, height: int) -> list[TextFragment]:
         if self.calibration_mode:
             return render_calibration_formatted(width, self.body_height(width, height), self.aspect_ratio)
         body_height = self.body_height(width, height)
@@ -373,7 +388,9 @@ class ViewerState:
         return "\n".join(visible)
 
 
-def element_legend(scene) -> str:
+def element_legend(scene: SceneData) -> str:
+    """Build a compact symbol-to-element legend for the current scene."""
+
     seen: set[str] = set()
     entries: list[str] = []
     for atom in scene.atoms:
@@ -387,6 +404,8 @@ def element_legend(scene) -> str:
 
 
 def wrapped_line_count(text: str, width: int) -> int:
+    """Estimate how many wrapped terminal lines a text block occupies."""
+
     usable_width = max(width, 1)
     if not text:
         return 0
@@ -397,6 +416,8 @@ def wrapped_line_count(text: str, width: int) -> int:
 
 
 def render_calibration_lines(width: int, height: int, aspect_ratio: float) -> list[str]:
+    """Render a braille circle used to calibrate terminal aspect ratio."""
+
     width = max(width, 1)
     height = max(height, 1)
     center_x = (width * 2 - 1) / 2.0
@@ -423,8 +444,10 @@ def render_calibration_lines(width: int, height: int, aspect_ratio: float) -> li
     return ["".join(row) for row in rows]
 
 
-def render_calibration_formatted(width: int, height: int, aspect_ratio: float) -> list[tuple[str, str]]:
-    fragments: list[tuple[str, str]] = []
+def render_calibration_formatted(width: int, height: int, aspect_ratio: float) -> list[TextFragment]:
+    """Return calibration output as prompt-toolkit fragments."""
+
+    fragments: list[TextFragment] = []
     for row in render_calibration_lines(width, height, aspect_ratio):
         fragments.append(("", row))
         fragments.append(("", "\n"))
@@ -463,13 +486,15 @@ def _braille_line_points(start: tuple[float, float], end: tuple[float, float]) -
 
 
 def direction_endpoints(
-    vectors,
+    vectors: Sequence[VectorLike],
     labels: tuple[str, str, str],
     camera: CameraState,
     width: int = AXIS_WIDGET_WIDTH,
     height: int = AXIS_WIDGET_HEIGHT,
     aspect_ratio: float = AXIS_ASPECT_RATIO,
-) -> list[tuple[str, float, float, float]]:
+) -> list[DirectionEndpoint]:
+    """Project three labeled basis vectors into widget coordinates."""
+
     width = max(width, 9)
     height = max(height, 7)
     center_x = width // 2
@@ -488,7 +513,7 @@ def direction_endpoints(
     max_planar_norm = max(((x * x + y * y) ** 0.5 for x, y, _ in projected), default=1.0)
     scale = radius * AXIS_LENGTH_SCALE / max(max_planar_norm, 1e-12)
 
-    endpoints: list[tuple[str, float, float, float]] = []
+    endpoints: list[DirectionEndpoint] = []
     for label, (x, y, z) in zip(labels, projected):
         planar_norm = (x * x + y * y) ** 0.5
         if planar_norm > 1e-9:
@@ -507,12 +532,14 @@ def direction_endpoints(
 
 
 def lattice_direction_endpoints(
-    cell,
+    cell: Sequence[VectorLike] | np.ndarray | None,
     camera: CameraState,
     width: int = AXIS_WIDGET_WIDTH,
     height: int = AXIS_WIDGET_HEIGHT,
     aspect_ratio: float = AXIS_ASPECT_RATIO,
-) -> list[tuple[str, float, float, float]]:
+) -> list[DirectionEndpoint]:
+    """Project lattice vectors into the lattice-direction widget."""
+
     cell_array = cell if cell is not None else ()
     vectors = [
         vector for vector in cell_array if len(vector) == 3 and any(abs(component) > 1e-12 for component in vector)
@@ -527,7 +554,9 @@ def cartesian_direction_endpoints(
     width: int = AXIS_WIDGET_WIDTH,
     height: int = AXIS_WIDGET_HEIGHT,
     aspect_ratio: float = AXIS_ASPECT_RATIO,
-) -> list[tuple[str, float, float, float]]:
+) -> list[DirectionEndpoint]:
+    """Project Cartesian basis vectors into the direction widget."""
+
     return direction_endpoints(
         (np.array([1.0, 0.0, 0.0]), np.array([0.0, 1.0, 0.0]), np.array([0.0, 0.0, 1.0])),
         ("x", "y", "z"),
@@ -540,7 +569,7 @@ def cartesian_direction_endpoints(
 
 def _render_direction_widget(
     title: str,
-    endpoints: list[tuple[str, float, float, float]],
+    endpoints: list[DirectionEndpoint],
     width: int,
     height: int,
 ) -> str:
@@ -603,12 +632,14 @@ def _render_direction_widget(
 
 
 def render_lattice_direction_widget(
-    cell,
+    cell: Sequence[VectorLike] | np.ndarray | None,
     camera: CameraState,
     width: int = AXIS_WIDGET_WIDTH,
     height: int = AXIS_WIDGET_HEIGHT,
     aspect_ratio: float = AXIS_ASPECT_RATIO,
 ) -> str:
+    """Render the lattice-basis orientation widget."""
+
     return _render_direction_widget(
         " abc dirs ", lattice_direction_endpoints(cell, camera, width, height, aspect_ratio), width, height
     )
@@ -620,12 +651,16 @@ def render_cartesian_direction_widget(
     height: int = AXIS_WIDGET_HEIGHT,
     aspect_ratio: float = AXIS_ASPECT_RATIO,
 ) -> str:
+    """Render the Cartesian-axis orientation widget."""
+
     return _render_direction_widget(
         " xyz dirs ", cartesian_direction_endpoints(camera, width, height, aspect_ratio), width, height
     )
 
 
 def build_application(state: ViewerState) -> Application:
+    """Construct the prompt_toolkit application and its key bindings."""
+
     body_control = FormattedTextControl(
         lambda: state.render_formatted(app.output.get_size().columns, app.output.get_size().rows)
     )
@@ -965,6 +1000,8 @@ def run_viewer(
     symprec: float = 1e-5,
     show_color: bool = False,
 ) -> None:
+    """Launch the full-screen terminal viewer."""
+
     state = ViewerState(
         paths,
         repeat=repeat,

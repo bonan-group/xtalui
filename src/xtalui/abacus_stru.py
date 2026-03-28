@@ -1,3 +1,5 @@
+"""Read ABACUS `STRU` files into ASE `Atoms` objects."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -16,9 +18,12 @@ STRU_BLOCK_TITLES = {
     "LATTICE_VECTORS",
     "ATOMIC_POSITIONS",
 }
+ParsedAtomLine = dict[str, list[float]]
 
 
 def looks_like_abacus_stru(path: Path) -> bool:
+    """Return `True` when a path looks like an ABACUS `STRU` file."""
+
     if path.suffix.lower() == ".stru" or path.name.upper() == "STRU":
         return True
     try:
@@ -33,6 +38,8 @@ def looks_like_abacus_stru(path: Path) -> bool:
 
 
 def read_abacus_stru(path: Path) -> Atoms:
+    """Parse a self-contained ABACUS `STRU` file."""
+
     blocks = _read_blocks(path)
     if "LATTICE_CONSTANT" not in blocks:
         raise ValueError(f"{path} is missing the LATTICE_CONSTANT block")
@@ -55,6 +62,8 @@ def _trim_line(line: str) -> str:
 
 
 def _read_blocks(path: Path) -> dict[str, list[str]]:
+    """Split a `STRU` file into normalized titled blocks."""
+
     with path.open("r", encoding="utf-8") as handle:
         lines = [_trim_line(line).replace("\t", " ") for line in handle]
     lines = [line for line in lines if line]
@@ -94,6 +103,8 @@ def _parse_species_order(lines: list[str]) -> list[str]:
 def _parse_positions(
     lines: list[str], species_order: list[str], lattice_constant: float, cell: np.ndarray
 ) -> tuple[list[str], np.ndarray]:
+    """Parse the `ATOMIC_POSITIONS` block and preserve species ordering."""
+
     coord_type = lines[0].strip()
     symbols: list[str] = []
     coords: list[np.ndarray] = []
@@ -117,9 +128,11 @@ def _parse_positions(
     return ordered_symbols, ordered_coords
 
 
-def _parse_atom_line(line: str) -> dict[str, list[float] | float | tuple[str, list[float]]]:
+def _parse_atom_line(line: str) -> ParsedAtomLine:
+    """Parse one atom line, ignoring auxiliary ABACUS metadata fields."""
+
     fields = line.split()
-    result: dict[str, list[float] | float | tuple[str, list[float]]] = {"coord": [float(value) for value in fields[:3]]}
+    result: ParsedAtomLine = {"coord": [float(value) for value in fields[:3]]}
 
     idx = 3
     while idx < len(fields):
@@ -153,11 +166,13 @@ def _parse_atom_line(line: str) -> dict[str, list[float] | float | tuple[str, li
 
 
 def _convert_coord(
-    parsed: dict[str, list[float] | float | tuple[str, list[float]]],
+    parsed: ParsedAtomLine,
     coord_type: str,
     lattice_constant: float,
     cell: np.ndarray,
 ) -> np.ndarray:
+    """Convert parsed ABACUS coordinates into Cartesian angstroms."""
+
     coord = np.array(parsed["coord"], dtype=float)
     lowered = coord_type.lower()
 

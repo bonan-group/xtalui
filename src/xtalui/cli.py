@@ -1,3 +1,5 @@
+"""Command-line entry points for the terminal structure viewer."""
+
 from __future__ import annotations
 
 import argparse
@@ -6,6 +8,8 @@ from xtalui.app import run_viewer
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Create the CLI parser for `xtal`."""
+
     parser = argparse.ArgumentParser(prog="xtal", description="Render an atomic structure directly in the terminal.")
     parser.add_argument(
         "paths",
@@ -50,6 +54,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
+    """Parse CLI arguments and launch the interactive viewer."""
+
     parser = build_parser()
     args = parser.parse_args()
     run_viewer(

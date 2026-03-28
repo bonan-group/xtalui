@@ -1,3 +1,5 @@
+"""Projection and terminal rendering helpers for xtalui scenes."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -48,23 +50,31 @@ BRAILLE_DOTS = {
     (1, 3): 0x80,
 }
 SPHERE_GLYPH = "●"
+TextFragment = tuple[str, str]
+ScreenPoint3D = tuple[float, float, float]
 
 
 @dataclass(frozen=True)
 class Viewport:
+    """Terminal drawing area measured in character cells."""
+
     width: int
     height: int
 
 
 @dataclass(frozen=True)
 class ProjectedSegment:
-    start: tuple[float, float, float]
-    end: tuple[float, float, float]
+    """Projected line segment with rendering priority."""
+
+    start: ScreenPoint3D
+    end: ScreenPoint3D
     priority: int
 
 
 @dataclass(frozen=True)
 class ProjectedSphere:
+    """Projected atom footprint used for braille sphere rendering."""
+
     x: float
     y: float
     z: float
@@ -368,6 +378,8 @@ def _braille_line_rows(width: int, height: int, segments: list[ProjectedSegment]
 def build_primitives(
     scene: SceneData, camera: CameraState, viewport: Viewport, options: RenderOptions | None = None
 ) -> list[RenderPrimitive]:
+    """Project a scene into draw-order-aware terminal primitives."""
+
     options = options or RenderOptions()
     atoms, segments, _ = _project_scene(scene, camera, viewport, options)
     return atoms + _unicode_line_primitives(segments)
@@ -376,12 +388,16 @@ def build_primitives(
 def render_ascii(
     scene: SceneData, camera: CameraState, viewport: Viewport, options: RenderOptions | None = None
 ) -> list[str]:
+    """Render a scene as plain text rows without style metadata."""
+
     return "".join(text for _, text in render_formatted(scene, camera, viewport, options)).split("\n")
 
 
 def render_formatted(
     scene: SceneData, camera: CameraState, viewport: Viewport, options: RenderOptions | None = None
-) -> list[tuple[str, str]]:
+) -> list[TextFragment]:
+    """Render a scene as prompt-toolkit style/text fragments."""
+
     options = options or RenderOptions()
     width = max(viewport.width, 1)
     height = max(viewport.height, 1)
@@ -434,7 +450,7 @@ def render_formatted(
                 styles[y][x] = primitive.style
                 depth[y][x] = primitive.z
                 priority[y][x] = primitive.priority
-    fragments: list[tuple[str, str]] = []
+    fragments: list[TextFragment] = []
     for row_chars, row_styles in zip(buffer, styles):
         current_style = row_styles[0]
         current_text = [row_chars[0]]
