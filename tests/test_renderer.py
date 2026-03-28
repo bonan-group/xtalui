@@ -83,6 +83,23 @@ def test_series_loading_applies_repeat_to_all_frames(tmp_path: Path) -> None:
     assert len(scenes[1].atoms) == len(atoms_b) * 2
 
 
+def test_series_loading_respects_global_image_number(tmp_path: Path) -> None:
+    frames = [
+        Atoms("H", positions=[[0.0, 0.0, 0.0]]),
+        Atoms("He", positions=[[0.0, 0.0, 0.0]]),
+        Atoms("Li", positions=[[0.0, 0.0, 0.0]]),
+    ]
+    path = tmp_path / "series.xyz"
+    write(path, frames, format="extxyz")
+
+    scenes = load_structures(path, image_number="1:")
+
+    assert len(scenes) == 2
+    assert scenes[0].symbols == ["He"]
+    assert scenes[1].symbols == ["Li"]
+    assert scenes[0].title == "series.xyz@1:"
+
+
 def test_multiple_input_paths_are_concatenated_into_one_series(tmp_path: Path) -> None:
     path_a = tmp_path / "a.cif"
     path_b = tmp_path / "b.cif"
@@ -96,6 +113,21 @@ def test_multiple_input_paths_are_concatenated_into_one_series(tmp_path: Path) -
     assert scenes[1].title == "b.cif"
     assert scenes[0].atoms.get_chemical_formula() == "Al4"
     assert scenes[1].atoms.get_chemical_formula() == "Cu4"
+
+
+def test_filename_slice_override_takes_precedence_over_global_image_number(tmp_path: Path) -> None:
+    path_a = tmp_path / "a.xyz"
+    path_b = tmp_path / "b.xyz"
+    write(path_a, [Atoms("H", positions=[[0.0, 0.0, 0.0]]), Atoms("He", positions=[[0.0, 0.0, 0.0]])], format="extxyz")
+    write(path_b, [Atoms("Li", positions=[[0.0, 0.0, 0.0]]), Atoms("Be", positions=[[0.0, 0.0, 0.0]])], format="extxyz")
+
+    scenes = load_structures([f"{path_a}@0", path_b], image_number="1")
+
+    assert len(scenes) == 2
+    assert scenes[0].symbols == ["H"]
+    assert scenes[1].symbols == ["Be"]
+    assert scenes[0].title == "a.xyz@0"
+    assert scenes[1].title == "b.xyz@1"
 
 
 def test_abacus_stru_loading_with_direct_coordinates(tmp_path: Path) -> None:

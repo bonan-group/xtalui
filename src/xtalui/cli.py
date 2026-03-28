@@ -1,15 +1,26 @@
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
 
 from xtalui.app import run_viewer
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="xtal", description="Render an atomic structure directly in the terminal.")
-    parser.add_argument("paths", type=Path, nargs="+", help="Path(s) to structure files")
     parser.add_argument(
+        "paths",
+        nargs="+",
+        help="Path(s) to structure files. Append @SLICE to override frame selection for one file.",
+    )
+    parser.add_argument(
+        "-n",
+        "--image-number",
+        default=":",
+        metavar="SLICE",
+        help="Pick individual image(s) from each file using Python slice syntax like 0, 1:, or ::2.",
+    )
+    parser.add_argument(
+        "-r",
         "--repeat",
         metavar=("NX", "NY", "NZ"),
         type=int,
@@ -23,12 +34,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Start with the unit cell hidden",
     )
     parser.add_argument(
+        "-s",
         "--symprec",
         type=float,
         default=1e-5,
         help="Symmetry tolerance passed to spglib for space-group detection",
     )
     parser.add_argument(
+        "-c",
         "--color",
         action="store_true",
         help="Start with element colors enabled",
@@ -42,6 +55,7 @@ def main() -> None:
     run_viewer(
         args.paths,
         tuple(args.repeat),
+        image_number=args.image_number,
         show_cell=not args.hide_cell,
         symprec=args.symprec,
         show_color=args.color,

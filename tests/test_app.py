@@ -302,6 +302,36 @@ def test_series_frame_navigation_wraps(tmp_path) -> None:
     assert state.frame_index == 0
 
 
+def test_repeat_reload_preserves_image_number_selection(tmp_path) -> None:
+    frames = [
+        Atoms("H", positions=[[0.0, 0.0, 0.0]], cell=np.eye(3), pbc=True),
+        Atoms("He", positions=[[0.0, 0.0, 0.0]], cell=np.eye(3), pbc=True),
+        Atoms("Li", positions=[[0.0, 0.0, 0.0]], cell=np.eye(3), pbc=True),
+    ]
+    path = tmp_path / "series.xyz"
+    write(path, frames, format="extxyz")
+    state = ViewerState(
+        paths=[path],
+        repeat=(1, 1, 1),
+        show_cell=True,
+        symprec=1e-5,
+        show_color=False,
+        image_number="1:",
+    )
+
+    assert state.frame_count == 2
+    assert state.scene.symbols == ["He"]
+
+    state.begin_repeat_command()
+    state.append_repeat_digit("2")
+    state.append_repeat_digit("1")
+    state.append_repeat_digit("1")
+
+    assert state.frame_count == 2
+    assert state.scene.symbols == ["He", "He"]
+    assert state.scenes[1].symbols == ["Li", "Li"]
+
+
 def test_frame_autoplay_advances_series(tmp_path) -> None:
     atoms_a = bulk("Si", "diamond", a=5.431, cubic=True)
     atoms_b = bulk("Si", "diamond", a=5.531, cubic=True)

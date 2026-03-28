@@ -46,9 +46,16 @@ ASPECT_RATIO_MAX = 4.0
 
 class ViewerState:
     def __init__(
-        self, paths: Sequence[Path], repeat: tuple[int, int, int], show_cell: bool, symprec: float, show_color: bool
+        self,
+        paths: Sequence[str | Path],
+        repeat: tuple[int, int, int],
+        show_cell: bool,
+        symprec: float,
+        show_color: bool,
+        image_number: str = ":",
     ) -> None:
         self.paths = tuple(paths)
+        self.image_number = image_number
         self.initial_repeat = tuple(int(value) for value in repeat)
         self.repeat = self.initial_repeat
         self.symprec = symprec
@@ -82,7 +89,7 @@ class ViewerState:
         return len(self.scenes)
 
     def reload_scene(self) -> None:
-        self.scenes = load_structures(self.paths, self.repeat)
+        self.scenes = load_structures(self.paths, self.repeat, image_number=self.image_number)
         self.infos = [structure_info(scene, symprec=self.symprec) for scene in self.scenes]
         self.frame_index = min(self.frame_index, len(self.scenes) - 1)
         self.position_scroll = 0
@@ -951,12 +958,20 @@ def build_application(state: ViewerState) -> Application:
 
 
 def run_viewer(
-    paths: Sequence[Path],
+    paths: Sequence[str | Path],
     repeat: tuple[int, int, int],
+    image_number: str = ":",
     show_cell: bool = True,
     symprec: float = 1e-5,
     show_color: bool = False,
 ) -> None:
-    state = ViewerState(paths, repeat=repeat, show_cell=show_cell, symprec=symprec, show_color=show_color)
+    state = ViewerState(
+        paths,
+        repeat=repeat,
+        show_cell=show_cell,
+        symprec=symprec,
+        show_color=show_color,
+        image_number=image_number,
+    )
     app = build_application(state)
     app.run()

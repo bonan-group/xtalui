@@ -19,7 +19,8 @@ except ImportError:  # pragma: no cover - exercised in integration, not unit tes
 
 AtomPositions = np.ndarray
 Matrix3 = np.ndarray
-StructurePaths = Path | Sequence[Path]
+PathInput = str | Path
+StructurePaths = PathInput | Sequence[PathInput]
 
 
 @dataclass(frozen=True)
@@ -76,36 +77,91 @@ class RenderPrimitive:
     style: str = ""
 
 
-def load_structure(paths: StructurePaths, repeat: tuple[int, int, int] = (1, 1, 1)) -> SceneData:
-    return load_structures(paths, repeat)[0]
+def load_structure(
+    paths: StructurePaths, repeat: tuple[int, int, int] = (1, 1, 1), image_number: str = ":"
+) -> SceneData:
+    return load_structures(paths, repeat, image_number=image_number)[0]
 
 
-def load_structures(paths: StructurePaths, repeat: tuple[int, int, int] = (1, 1, 1)) -> list[SceneData]:
+def load_structures(
+    paths: StructurePaths, repeat: tuple[int, int, int] = (1, 1, 1), image_number: str = ":"
+) -> list[SceneData]:
     scenes: list[SceneData] = []
-    for path in _normalize_paths(paths):
-        atoms_series = read_structure_series(path)
-        scenes.extend(_scene_from_atoms(_repeat_atoms(atoms, repeat), path.name) for atoms in atoms_series)
+    for path_input in _normalize_paths(paths):
+        path, file_image_number, title = _resolve_path_input(path_input, image_number)
+        atoms_series = read_structure_series(path, image_number=file_image_number)
+        scenes.extend(_scene_from_atoms(_repeat_atoms(atoms, repeat), title) for atoms in atoms_series)
     return scenes
 
 
-def _normalize_paths(paths: StructurePaths) -> tuple[Path, ...]:
-    if isinstance(paths, Path):
+def _normalize_paths(paths: StructurePaths) -> tuple[PathInput, ...]:
+    if isinstance(paths, (str, Path)):
         return (paths,)
-    normalized = tuple(Path(path) for path in paths)
+    normalized = tuple(paths)
     if not normalized:
         raise ValueError("at least one structure path is required")
     return normalized
 
 
-def read_structure_series(path: Path) -> list[Atoms]:
+def _resolve_path_input(path_input: PathInput, default_image_number: str) -> tuple[Path, str, str]:
+    if isinstance(path_input, Path):
+        path = path_input
+        image_number = default_image_number
+    else:
+        raw = str(path_input)
+        path_text, image_override = _split_path_and_image_number(raw)
+        path = Path(path_text)
+        image_number = image_override if image_override is not None else default_image_number
+    title = path.name if image_number == ":" else f"{path.name}@{image_number}"
+    return path, image_number, title
+
+
+def _split_path_and_image_number(raw: str) -> tuple[str, str | None]:
+    if "@" not in raw or Path(raw).exists():
+        return raw, None
+    path_text, image_number = raw.rsplit("@", 1)
+    if not path_text or not image_number:
+        return raw, None
+    try:
+        _parse_image_number(image_number)
+    except ValueError:
+        return raw, None
+    return path_text, image_number
+
+
+def _parse_image_number(image_number: str) -> int | slice:
+    if ":" not in image_number:
+        return int(image_number)
+    parts = image_number.split(":")
+    if len(parts) > 3:
+        raise ValueError(f"invalid image-number slice: {image_number}")
+    values = [None if part == "" else int(part) for part in parts]
+    while len(values) < 3:
+        values.append(None)
+    return slice(*values)
+
+
+def _select_images(atoms_series: Sequence[Atoms], image_number: str) -> list[Atoms]:
+    if image_number == ":":
+        return list(atoms_series)
+    selection = atoms_series[_parse_image_number(image_number)]
+    if isinstance(selection, Atoms):
+        return [selection]
+    return list(selection)
+
+
+def read_structure_series(path: Path, image_number: str = ":") -> list[Atoms]:
     if looks_like_abacus_stru(path):
-        return [read_abacus_stru(path)]
-    atoms = read(path, index=":")
+        return _select_images([read_abacus_stru(path)], image_number)
+    atoms = read(path, index=image_number)
     if isinstance(atoms, Atoms):
         return [atoms]
     if atoms:
         return list(atoms)
-    return [read(path)]
+    fallback = read(path)
+    if isinstance(fallback, Atoms):
+        return _select_images([fallback], image_number)
+    return _select_images(list(fallback), image_number)
 
 
 def _repeat_atoms(atoms: Atoms, repeat: tuple[int, int, int]) -> Atoms:

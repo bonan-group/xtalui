@@ -115,9 +115,11 @@ uv run ruff format --check .
 ```bash
 uv run xtal structure.cif
 uv run xtal frame1.xyz frame2.xyz
-uv run xtal POSCAR --repeat 2 2 1
-uv run xtal structure.cif --symprec 1e-3
-uv run xtal structure.cif --color
+uv run xtal -n 1: trajectory.xyz
+uv run xtal trajectory.xyz@::10 other.xyz@-5:
+uv run xtal POSCAR -r 2 2 1
+uv run xtal structure.cif -s 1e-3
+uv run xtal structure.cif -c
 uv run xtal STRU
 ```
 
@@ -133,10 +135,13 @@ uv run xtal examples/graphite_hexagonal.cif
 
 - `PATH`: one or more structure files to open with ASE
 - If multiple paths are given, all frames from all files are concatenated into one trajectory series in the order provided
-- `--repeat NX NY NZ`: repeat the structure along each lattice direction
+- Append `@SLICE` to one filename to select a subset of frames from that file only, for example `traj.xyz@::5`
+- `-n SLICE`, `--image-number SLICE`: pick individual image(s) from each input file using Python slice syntax like `0`, `1:`, `:10`, or `::2`
+- `@SLICE` on a filename overrides `-n/--image-number` for that file
+- `-r NX NY NZ`, `--repeat NX NY NZ`: repeat the structure along each lattice direction
 - `--hide-cell`: start with the unit cell hidden
-- `--symprec FLOAT`: set the symmetry tolerance used for space-group detection
-- `--color`: start with element colors enabled
+- `-s FLOAT`, `--symprec FLOAT`: set the symmetry tolerance used for space-group detection
+- `-c`, `--color`: start with element colors enabled
 
 ## Controls
 
