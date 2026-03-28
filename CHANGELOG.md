@@ -6,6 +6,17 @@ The format is based on Keep a Changelog.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-03-28
+
+### Added
+
+- ASE-style frame selection with `-n/--image-number` and per-file `@SLICE` syntax
+- Short CLI flags `-r` for repeat, `-s` for symmetry tolerance, and `-c` for color
+
+### Changed
+
+- README installation and usage documentation expanded for overlays, sphere mode, calibration, and frame selection
+
 ## [0.1.0] - 2026-03-27
 
 ### Added
