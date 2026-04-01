@@ -605,16 +605,10 @@ class ViewerState:
             lines.append(" pick 1 more atom for a distance")
             return lines
         if len(selection) >= 2:
-            lines.append(
-                f" d(1,2) = {self.selection_distance(selection[0], selection[1]):7.3f} A"
-            )
+            lines.append(f" d(1,2) = {self.selection_distance(selection[0], selection[1]):7.3f} A")
         if len(selection) == 3:
-            lines.append(
-                f" d(2,3) = {self.selection_distance(selection[1], selection[2]):7.3f} A"
-            )
-            lines.append(
-                f" a(1,2,3) = {self.selection_angle(selection[0], selection[1], selection[2]):7.2f} deg"
-            )
+            lines.append(f" d(2,3) = {self.selection_distance(selection[1], selection[2]):7.3f} A")
+            lines.append(f" a(1,2,3) = {self.selection_angle(selection[0], selection[1], selection[2]):7.2f} deg")
         return lines
 
     def selection_text(self) -> str:
@@ -1158,7 +1152,9 @@ def build_application(state: ViewerState) -> Application:
                 state.cancel_delete_command()
             else:
                 state.pending_delete_command = state.pending_delete_command[:-1]
-                state.status_message = "delete selection: type a buffer position or press d again to delete the last entry"
+                state.status_message = (
+                    "delete selection: type a buffer position or press d again to delete the last entry"
+                )
         elif state.pending_sphere_scale_command is not None:
             if not state.pending_sphere_scale_command:
                 state.cancel_sphere_scale_command()
