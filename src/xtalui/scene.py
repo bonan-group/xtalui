@@ -66,6 +66,7 @@ class CameraState:
     show_cell: bool = True
     show_bonds: bool = True
     show_labels: bool = False
+    show_indices: bool = False
     show_color: bool = False
     show_spheres: bool = False
     show_help: bool = False
@@ -78,6 +79,8 @@ class RenderOptions:
     atom_radius_scale: float = 0.55
     depth_scale: float = 1.0
     aspect_ratio: float = 2.0
+    selected_indices: frozenset[int] = frozenset()
+    selection_style: str = "fg:#ffd54f"
 
 
 @dataclass(frozen=True)

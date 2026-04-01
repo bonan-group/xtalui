@@ -40,6 +40,7 @@ AXIS_WIDGET_HEIGHT = 10
 AXIS_ASPECT_RATIO = 2.0
 AXIS_LENGTH_SCALE = 1.5
 POSITIONS_PANEL_LINES = 9
+SELECTION_PANEL_LINES = 10
 AUTOROTATE_INTERVAL = 0.05
 AUTOROTATE_STEP = 0.08
 FRAME_PLAY_INTERVAL = 0.25
@@ -49,6 +50,8 @@ ASPECT_RATIO_MAX = 4.0
 DirectionEndpoint = tuple[str, float, float, float]
 TextFragment = tuple[str, str]
 VectorLike = Sequence[float] | np.ndarray
+DEFAULT_SPHERE_SCALE = RenderOptions().atom_radius_scale
+SELECTION_BUFFER_LIMIT = 3
 
 
 class ViewerState:
@@ -61,6 +64,8 @@ class ViewerState:
         show_cell: bool,
         symprec: float,
         show_color: bool,
+        show_labels: bool = True,
+        show_spheres: bool = True,
         image_number: str = ":",
     ) -> None:
         self.paths: tuple[str | Path, ...] = tuple(paths)
@@ -68,13 +73,24 @@ class ViewerState:
         self.initial_repeat: tuple[int, int, int] = tuple(int(value) for value in repeat)
         self.repeat = self.initial_repeat
         self.symprec = symprec
-        self.camera = CameraState(show_cell=show_cell, show_color=show_color)
+        self.camera = CameraState(
+            show_cell=show_cell,
+            show_color=show_color,
+            show_labels=show_labels,
+            show_spheres=show_spheres,
+        )
+        self.frame_selections: list[list[int]] = []
         self.pending_repeat_command: str | None = None
+        self.pending_sphere_scale_command: str | None = None
+        self.pending_select_command: str | None = None
+        self.pending_delete_command: str | None = None
         self.status_message = ""
         self.autorotate = False
         self.frame_autoplay = False
         self.calibration_mode = False
         self.aspect_ratio = RenderOptions().aspect_ratio
+        self.initial_sphere_scale = DEFAULT_SPHERE_SCALE
+        self.sphere_scale = self.initial_sphere_scale
         self.show_positions = False
         self.position_scroll = 0
         self.show_bond_lengths = False
@@ -107,16 +123,55 @@ class ViewerState:
         self.scenes = load_structures(self.paths, self.repeat, image_number=self.image_number)
         self.infos = [structure_info(scene, symprec=self.symprec) for scene in self.scenes]
         self.frame_index = min(self.frame_index, len(self.scenes) - 1)
+        self.frame_selections = [[] for _ in self.scenes]
+        self.pending_repeat_command = None
+        self.pending_sphere_scale_command = None
+        self.pending_select_command = None
+        self.pending_delete_command = None
         self.position_scroll = 0
         self.bond_scroll = 0
 
     def begin_repeat_command(self) -> None:
+        self._clear_pending_commands()
         self.pending_repeat_command = ""
         self.status_message = "repeat: type rXYZ, for example r222"
 
     def cancel_repeat_command(self) -> None:
         self.pending_repeat_command = None
         self.status_message = "repeat command cancelled"
+
+    def begin_sphere_scale_command(self) -> None:
+        self._clear_pending_commands()
+        self.pending_sphere_scale_command = ""
+        self.status_message = f"sphere scale: type a positive number and press Enter (current {self.sphere_scale:.2f})"
+
+    def cancel_sphere_scale_command(self) -> None:
+        self.pending_sphere_scale_command = None
+        self.status_message = "sphere scale command cancelled"
+
+    def begin_select_command(self) -> None:
+        self._clear_pending_commands()
+        self.pending_select_command = ""
+        self.status_message = "select atom: type a 1-based atom index and press Enter"
+
+    def cancel_select_command(self) -> None:
+        self.pending_select_command = None
+        self.status_message = "select command cancelled"
+
+    def begin_delete_command(self) -> None:
+        self._clear_pending_commands()
+        self.pending_delete_command = ""
+        self.status_message = "delete selection: type a buffer position or press d again to delete the last entry"
+
+    def cancel_delete_command(self) -> None:
+        self.pending_delete_command = None
+        self.status_message = "delete command cancelled"
+
+    def _clear_pending_commands(self) -> None:
+        self.pending_repeat_command = None
+        self.pending_sphere_scale_command = None
+        self.pending_select_command = None
+        self.pending_delete_command = None
 
     def append_repeat_digit(self, digit: str) -> None:
         if self.pending_repeat_command is None:
@@ -131,6 +186,107 @@ class ViewerState:
         self.pending_repeat_command = None
         self.reload_scene()
         self.status_message = f"repeat set to {self.repeat[0]}x{self.repeat[1]}x{self.repeat[2]}"
+
+    def append_sphere_scale_char(self, char: str) -> None:
+        if self.pending_sphere_scale_command is None:
+            return
+        if char not in "0123456789.":
+            self.status_message = "sphere scale accepts digits and one decimal point"
+            return
+        if char == "." and "." in self.pending_sphere_scale_command:
+            self.status_message = "sphere scale accepts only one decimal point"
+            return
+        self.pending_sphere_scale_command += char
+
+    def apply_sphere_scale_command(self) -> None:
+        if self.pending_sphere_scale_command is None:
+            return
+        if self.pending_sphere_scale_command in {"", "."}:
+            self.status_message = "sphere scale requires a positive number"
+            return
+        value = float(self.pending_sphere_scale_command)
+        if not np.isfinite(value) or value <= 0.0:
+            self.status_message = "sphere scale must be a finite positive number"
+            return
+        self.sphere_scale = value
+        self.pending_sphere_scale_command = None
+        self.status_message = f"sphere scale set to {self.sphere_scale:.2f}"
+
+    def append_index_char(self, char: str, *, mode: str) -> None:
+        pending_name = "pending_select_command" if mode == "select" else "pending_delete_command"
+        pending = getattr(self, pending_name)
+        if pending is None:
+            return
+        if char not in "0123456789":
+            noun = "atom index" if mode == "select" else "buffer position"
+            self.status_message = f"{noun} accepts digits only"
+            return
+        setattr(self, pending_name, pending + char)
+
+    def current_selection(self) -> list[int]:
+        return self.frame_selections[self.frame_index]
+
+    def selected_index_set(self) -> frozenset[int]:
+        return frozenset(self.current_selection())
+
+    def has_selection(self) -> bool:
+        return bool(self.current_selection())
+
+    @property
+    def show_selection_panel(self) -> bool:
+        return self.has_selection() and not self.show_positions and not self.show_bond_lengths
+
+    def append_selected_atom(self, atom_index: int) -> None:
+        selection = self.current_selection()
+        selection.append(atom_index)
+        if len(selection) > SELECTION_BUFFER_LIMIT:
+            del selection[:-SELECTION_BUFFER_LIMIT]
+        self.status_message = f"selected atom {atom_index + 1}"
+
+    def apply_select_command(self) -> None:
+        if self.pending_select_command is None:
+            return
+        if not self.pending_select_command:
+            self.status_message = "select atom requires a 1-based atom index"
+            return
+        atom_index = int(self.pending_select_command) - 1
+        if not (0 <= atom_index < len(self.scene.atoms)):
+            self.status_message = f"atom index must be in 1..{len(self.scene.atoms)}"
+            return
+        self.append_selected_atom(atom_index)
+        self.pending_select_command = None
+
+    def delete_last_selected_atom(self) -> None:
+        selection = self.current_selection()
+        if not selection:
+            self.pending_delete_command = None
+            self.status_message = "selection buffer is empty"
+            return
+        removed = selection.pop()
+        self.pending_delete_command = None
+        self.status_message = f"deleted selection atom {removed + 1}"
+
+    def apply_delete_command(self) -> None:
+        if self.pending_delete_command is None:
+            return
+        if not self.pending_delete_command:
+            self.status_message = "delete requires a selection buffer position; use dd to delete the last entry"
+            return
+        selection_position = int(self.pending_delete_command) - 1
+        selection = self.current_selection()
+        if not (0 <= selection_position < len(selection)):
+            self.status_message = f"selection position must be in 1..{len(selection)}"
+            return
+        removed = selection.pop(selection_position)
+        self.pending_delete_command = None
+        self.status_message = f"deleted selection entry {selection_position + 1} (atom {removed + 1})"
+
+    def selection_prompt(self) -> str:
+        if self.pending_select_command is not None:
+            return f"cmd=e{self.pending_select_command or '_'}"
+        if self.pending_delete_command is not None:
+            return f"cmd=d{self.pending_delete_command or '_'}"
+        return ""
 
     def step_frame(self, delta: int) -> None:
         if self.frame_count <= 1:
@@ -176,11 +332,19 @@ class ViewerState:
         digits = self.pending_repeat_command.ljust(3, "_")
         return f"cmd=r{digits}"
 
+    def sphere_scale_prompt(self) -> str:
+        if self.pending_sphere_scale_command is None:
+            return ""
+        value = self.pending_sphere_scale_command or "_"
+        return f"cmd=S{value}"
+
     def reset_viewer(self) -> None:
         self.camera = reset_camera(self.camera)
-        self.pending_repeat_command = None
+        self._clear_pending_commands()
         self.position_scroll = 0
         self.bond_scroll = 0
+        self.sphere_scale = self.initial_sphere_scale
+        self.frame_selections = [[] for _ in self.scenes]
         if self.repeat != self.initial_repeat:
             self.repeat = self.initial_repeat
             self.reload_scene()
@@ -194,7 +358,11 @@ class ViewerState:
             self.scene,
             self.camera,
             Viewport(width=width, height=body_height),
-            RenderOptions(aspect_ratio=self.aspect_ratio),
+            RenderOptions(
+                atom_radius_scale=self.sphere_scale,
+                aspect_ratio=self.aspect_ratio,
+                selected_indices=self.selected_index_set(),
+            ),
         )
         return "\n".join(rows)
 
@@ -206,7 +374,11 @@ class ViewerState:
             self.scene,
             self.camera,
             Viewport(width=width, height=body_height),
-            RenderOptions(aspect_ratio=self.aspect_ratio),
+            RenderOptions(
+                atom_radius_scale=self.sphere_scale,
+                aspect_ratio=self.aspect_ratio,
+                selected_indices=self.selected_index_set(),
+            ),
         )
 
     def body_height(self, width: int, height: int) -> int:
@@ -253,12 +425,14 @@ class ViewerState:
             f"frame={self.frame_index + 1}/{self.frame_count}",
             f"repeat={self.repeat[0]}x{self.repeat[1]}x{self.repeat[2]}",
             f"aspect={self.aspect_ratio:.2f}",
+            f"sphere-scale={self.sphere_scale:.2f}",
             f"zoom={self.camera.zoom:.2f}  "
             f"pan=({self.camera.pan_x:.1f}, {self.camera.pan_y:.1f})  "
             f"mode={self.camera.line_mode}  "
             f"cal={'on' if self.calibration_mode else 'off'}  "
             f"spin={'on' if self.autorotate else 'off'}  "
             f"play={'on' if self.frame_autoplay else 'off'}  "
+            f"sel={len(self.current_selection())}  "
             f"pos={'on' if self.show_positions else 'off'}  "
             f"bondlen={'on' if self.show_bond_lengths else 'off'}  "
             f"color={'on' if self.camera.show_color else 'off'}  "
@@ -267,10 +441,15 @@ class ViewerState:
             f"xyz={'on' if self.camera.show_xyz_panel else 'off'}  "
             f"cell={'on' if self.camera.show_cell else 'off'}  "
             f"bonds={'on' if self.camera.show_bonds else 'off'}  "
-            f"labels={'on' if self.camera.show_labels else 'off'}",
+            f"labels={'on' if self.camera.show_labels else 'off'}  "
+            f"indices={'on' if self.camera.show_indices else 'off'}",
         ]
         if self.pending_repeat_command is not None:
             parts.append(self.repeat_prompt())
+        if self.pending_sphere_scale_command is not None:
+            parts.append(self.sphere_scale_prompt())
+        if self.pending_select_command is not None or self.pending_delete_command is not None:
+            parts.append(self.selection_prompt())
         if self.status_message:
             parts.append(self.status_message)
         return "  ".join(parts)
@@ -278,7 +457,7 @@ class ViewerState:
     def help_text(self) -> str:
         if not self.camera.show_help:
             return ""
-        return "Arrows rotate | a autorotate | p positions | B bond lengths | t play frames | T calibration | [/] frames | x/y/z align view | r123 repeat | Ctrl-R reset | 1 abc panel | 2 xyz panel | m mode | s spheres | S-Arrows pan | +/- zoom | Left/Right or +/- adjust aspect in calibration | b bonds | c cell | l labels | C color | j/k or Up/Down scroll active overlay | Esc cancel cmd | ? help | q quit"
+        return "Arrows/hjkl rotate | a autorotate | p positions | B bond lengths | t play frames | T calibration | [/] frames | x/y/z align view | e select atom + Enter | d delete entry + Enter | dd delete last | r123 repeat | S sphere scale + Enter | Ctrl-R reset | 1 abc panel | 2 xyz panel | m mode | s spheres | Shift-Arrows pan | +/- zoom | Left/Right or h/l adjust aspect in calibration | b bonds | c cell | L labels | i indices | C color | j/k or Up/Down scroll active overlay | Esc cancel cmd | ? help | q quit"
 
     def toggle_calibration(self) -> None:
         self.calibration_mode = not self.calibration_mode
@@ -330,6 +509,7 @@ class ViewerState:
             return
         if self.show_positions:
             self.scroll_positions(delta)
+            return
 
     def max_position_scroll(self) -> int:
         return max(len(self.position_lines()) - POSITIONS_PANEL_LINES, 0)
@@ -386,6 +566,59 @@ class ViewerState:
         self._clamp_bond_scroll()
         visible = lines[self.bond_scroll : self.bond_scroll + POSITIONS_PANEL_LINES]
         return "\n".join(visible)
+
+    def selection_distance(self, start_index: int, end_index: int) -> float:
+        positions = np.asarray(self.scene.atoms.get_positions(), dtype=float)
+        return float(np.linalg.norm(positions[end_index] - positions[start_index]))
+
+    def selection_angle(self, first_index: int, middle_index: int, last_index: int) -> float:
+        positions = np.asarray(self.scene.atoms.get_positions(), dtype=float)
+        first_vector = positions[first_index] - positions[middle_index]
+        last_vector = positions[last_index] - positions[middle_index]
+        first_norm = float(np.linalg.norm(first_vector))
+        last_norm = float(np.linalg.norm(last_vector))
+        if first_norm == 0.0 or last_norm == 0.0:
+            return 0.0
+        cosine = float(np.dot(first_vector, last_vector) / (first_norm * last_norm))
+        cosine = min(max(cosine, -1.0), 1.0)
+        return float(np.degrees(np.arccos(cosine)))
+
+    def selection_lines(self) -> list[str]:
+        lines = [
+            " sel  atom  el        x        y        z",
+            "------------------------------------------",
+        ]
+        positions = np.asarray(self.scene.atoms.get_positions(), dtype=float)
+        for selection_position, atom_index in enumerate(self.current_selection(), start=1):
+            cart = positions[atom_index]
+            lines.append(
+                f"{selection_position:4d}  {atom_index + 1:4d}  {self.scene.symbols[atom_index]:<2}  "
+                f"{cart[0]:7.3f}  {cart[1]:7.3f}  {cart[2]:7.3f}"
+            )
+        if len(lines) == 2:
+            lines.append(" no selected atoms")
+            return lines
+        lines.append("")
+        lines.append(" measurements")
+        selection = self.current_selection()
+        if len(selection) == 1:
+            lines.append(" pick 1 more atom for a distance")
+            return lines
+        if len(selection) >= 2:
+            lines.append(
+                f" d(1,2) = {self.selection_distance(selection[0], selection[1]):7.3f} A"
+            )
+        if len(selection) == 3:
+            lines.append(
+                f" d(2,3) = {self.selection_distance(selection[1], selection[2]):7.3f} A"
+            )
+            lines.append(
+                f" a(1,2,3) = {self.selection_angle(selection[0], selection[1], selection[2]):7.2f} deg"
+            )
+        return lines
+
+    def selection_text(self) -> str:
+        return "\n".join(self.selection_lines()[:SELECTION_PANEL_LINES])
 
 
 def element_legend(scene: SceneData) -> str:
@@ -669,6 +902,7 @@ def build_application(state: ViewerState) -> Application:
     cartesian_axis_control = FormattedTextControl(lambda: state.cartesian_axis_text())
     positions_control = FormattedTextControl(lambda: state.positions_text())
     bond_control = FormattedTextControl(lambda: state.bond_text())
+    selection_control = FormattedTextControl(lambda: state.selection_text())
     footer_control = FormattedTextControl(lambda: state.status())
     help_control = FormattedTextControl(lambda: state.help_text())
 
@@ -693,6 +927,19 @@ def build_application(state: ViewerState) -> Application:
     body = FloatContainer(
         content=Window(content=body_control, always_hide_cursor=True),
         floats=[
+            Float(
+                left=0,
+                right=0,
+                bottom=0,
+                content=ConditionalContainer(
+                    content=Window(
+                        content=selection_control,
+                        height=SELECTION_PANEL_LINES,
+                        always_hide_cursor=True,
+                    ),
+                    filter=Condition(lambda: state.show_selection_panel),
+                ),
+            ),
             Float(
                 left=0,
                 right=0,
@@ -747,41 +994,37 @@ def build_application(state: ViewerState) -> Application:
     def _quit(event) -> None:
         event.app.exit()
 
-    @bindings.add("left")
-    def _left(event) -> None:
-        if state.calibration_mode:
-            state.adjust_aspect_ratio(-ASPECT_RATIO_STEP)
+    def _rotate_or_scroll(event, *, dx: float = 0.0, dy: float = 0.0, aspect_delta: float = 0.0) -> None:
+        if state.calibration_mode and aspect_delta:
+            state.adjust_aspect_ratio(aspect_delta)
             event.app.invalidate()
             return
-        state.camera = with_rotation(state.camera, dx=-0.12, dy=0.0)
+        if dy and (state.show_positions or state.show_bond_lengths):
+            state.scroll_overlay(-1 if dy < 0.0 else 1)
+            event.app.invalidate()
+            return
+        state.camera = with_rotation(state.camera, dx=dx, dy=dy)
         event.app.invalidate()
+
+    @bindings.add("left")
+    @bindings.add("h")
+    def _left(event) -> None:
+        _rotate_or_scroll(event, dx=-0.12, aspect_delta=-ASPECT_RATIO_STEP)
 
     @bindings.add("right")
+    @bindings.add("l")
     def _right(event) -> None:
-        if state.calibration_mode:
-            state.adjust_aspect_ratio(ASPECT_RATIO_STEP)
-            event.app.invalidate()
-            return
-        state.camera = with_rotation(state.camera, dx=0.12, dy=0.0)
-        event.app.invalidate()
+        _rotate_or_scroll(event, dx=0.12, aspect_delta=ASPECT_RATIO_STEP)
 
     @bindings.add("up")
+    @bindings.add("k")
     def _up(event) -> None:
-        if state.show_positions or state.show_bond_lengths:
-            state.scroll_overlay(-1)
-            event.app.invalidate()
-            return
-        state.camera = with_rotation(state.camera, dx=0.0, dy=-0.12)
-        event.app.invalidate()
+        _rotate_or_scroll(event, dy=-0.12)
 
     @bindings.add("down")
+    @bindings.add("j")
     def _down(event) -> None:
-        if state.show_positions or state.show_bond_lengths:
-            state.scroll_overlay(1)
-            event.app.invalidate()
-            return
-        state.camera = with_rotation(state.camera, dx=0.0, dy=0.12)
-        event.app.invalidate()
+        _rotate_or_scroll(event, dy=0.12)
 
     @bindings.add("a")
     def _toggle_autorotate(event) -> None:
@@ -806,20 +1049,6 @@ def build_application(state: ViewerState) -> Application:
     @bindings.add("T")
     def _toggle_calibration(event) -> None:
         state.toggle_calibration()
-        event.app.invalidate()
-
-    @bindings.add("j")
-    def _scroll_positions_down(event) -> None:
-        if not (state.show_positions or state.show_bond_lengths):
-            return
-        state.scroll_overlay(1)
-        event.app.invalidate()
-
-    @bindings.add("k")
-    def _scroll_positions_up(event) -> None:
-        if not (state.show_positions or state.show_bond_lengths):
-            return
-        state.scroll_overlay(-1)
         event.app.invalidate()
 
     @bindings.add("s-left")
@@ -866,23 +1095,84 @@ def build_application(state: ViewerState) -> Application:
         state.begin_repeat_command()
         event.app.invalidate()
 
-    @bindings.add("c-r")
-    def _reset(event) -> None:
-        state.reset_viewer()
+    @bindings.add("e")
+    def _begin_select(event) -> None:
+        state.begin_select_command()
         event.app.invalidate()
 
-    @bindings.add("escape", filter=Condition(lambda: state.pending_repeat_command is not None))
+    @bindings.add("S")
+    def _begin_sphere_scale(event) -> None:
+        state.begin_sphere_scale_command()
+        event.app.invalidate()
+
+    @bindings.add(
+        "escape",
+        filter=Condition(
+            lambda: any(
+                command is not None
+                for command in (
+                    state.pending_repeat_command,
+                    state.pending_sphere_scale_command,
+                    state.pending_select_command,
+                    state.pending_delete_command,
+                )
+            )
+        ),
+        eager=True,
+    )
     def _cancel_repeat(event) -> None:
-        state.cancel_repeat_command()
+        if state.pending_select_command is not None:
+            state.cancel_select_command()
+        elif state.pending_delete_command is not None:
+            state.cancel_delete_command()
+        elif state.pending_sphere_scale_command is not None:
+            state.cancel_sphere_scale_command()
+        else:
+            state.cancel_repeat_command()
         event.app.invalidate()
 
-    @bindings.add("backspace", filter=Condition(lambda: state.pending_repeat_command is not None))
-    def _repeat_backspace(event) -> None:
-        if not state.pending_repeat_command:
-            state.cancel_repeat_command()
+    @bindings.add(
+        "backspace",
+        filter=Condition(
+            lambda: any(
+                command is not None
+                for command in (
+                    state.pending_repeat_command,
+                    state.pending_sphere_scale_command,
+                    state.pending_select_command,
+                    state.pending_delete_command,
+                )
+            )
+        ),
+        eager=True,
+    )
+    def _command_backspace(event) -> None:
+        if state.pending_select_command is not None:
+            if not state.pending_select_command:
+                state.cancel_select_command()
+            else:
+                state.pending_select_command = state.pending_select_command[:-1]
+                state.status_message = "select atom: type a 1-based atom index and press Enter"
+        elif state.pending_delete_command is not None:
+            if not state.pending_delete_command:
+                state.cancel_delete_command()
+            else:
+                state.pending_delete_command = state.pending_delete_command[:-1]
+                state.status_message = "delete selection: type a buffer position or press d again to delete the last entry"
+        elif state.pending_sphere_scale_command is not None:
+            if not state.pending_sphere_scale_command:
+                state.cancel_sphere_scale_command()
+            else:
+                state.pending_sphere_scale_command = state.pending_sphere_scale_command[:-1]
+                state.status_message = (
+                    f"sphere scale: type a positive number and press Enter (current {state.sphere_scale:.2f})"
+                )
         else:
-            state.pending_repeat_command = state.pending_repeat_command[:-1]
-            state.status_message = "repeat: type rXYZ, for example r222"
+            if not state.pending_repeat_command:
+                state.cancel_repeat_command()
+            else:
+                state.pending_repeat_command = state.pending_repeat_command[:-1]
+                state.status_message = "repeat: type rXYZ, for example r222"
         event.app.invalidate()
 
     def _append_repeat_digit_if_active(digit: str) -> bool:
@@ -891,12 +1181,69 @@ def build_application(state: ViewerState) -> Application:
         state.append_repeat_digit(digit)
         return True
 
-    @bindings.add("<any>", filter=Condition(lambda: state.pending_repeat_command is not None))
-    def _repeat_digits(event) -> None:
+    @bindings.add(
+        "enter",
+        filter=Condition(
+            lambda: any(
+                command is not None
+                for command in (
+                    state.pending_sphere_scale_command,
+                    state.pending_select_command,
+                    state.pending_delete_command,
+                )
+            )
+        ),
+        eager=True,
+    )
+    def _apply_command(event) -> None:
+        if state.pending_select_command is not None:
+            state.apply_select_command()
+        elif state.pending_delete_command is not None:
+            state.apply_delete_command()
+        else:
+            state.apply_sphere_scale_command()
+        event.app.invalidate()
+
+    @bindings.add(
+        "<any>",
+        filter=Condition(
+            lambda: any(
+                command is not None
+                for command in (
+                    state.pending_repeat_command,
+                    state.pending_sphere_scale_command,
+                    state.pending_select_command,
+                    state.pending_delete_command,
+                )
+            )
+        ),
+        eager=True,
+    )
+    def _command_input(event) -> None:
         key = event.key_sequence[0].key
         if key is None:
             return
-        state.append_repeat_digit(key)
+        if state.pending_delete_command is not None:
+            if key == "d" and state.pending_delete_command == "":
+                state.delete_last_selected_atom()
+            else:
+                state.append_index_char(key, mode="delete")
+        elif state.pending_select_command is not None:
+            state.append_index_char(key, mode="select")
+        elif state.pending_sphere_scale_command is not None:
+            state.append_sphere_scale_char(key)
+        else:
+            state.append_repeat_digit(key)
+        event.app.invalidate()
+
+    @bindings.add("d")
+    def _begin_delete(event) -> None:
+        state.begin_delete_command()
+        event.app.invalidate()
+
+    @bindings.add("c-r")
+    def _reset(event) -> None:
+        state.reset_viewer()
         event.app.invalidate()
 
     @bindings.add("c")
@@ -914,9 +1261,14 @@ def build_application(state: ViewerState) -> Application:
         state.camera = toggle_flag(state.camera, "show_bonds")
         event.app.invalidate()
 
-    @bindings.add("l")
+    @bindings.add("L")
     def _toggle_labels(event) -> None:
         state.camera = toggle_flag(state.camera, "show_labels")
+        event.app.invalidate()
+
+    @bindings.add("i")
+    def _toggle_indices(event) -> None:
+        state.camera = toggle_flag(state.camera, "show_indices")
         event.app.invalidate()
 
     @bindings.add("1")
@@ -998,7 +1350,9 @@ def run_viewer(
     image_number: str = ":",
     show_cell: bool = True,
     symprec: float = 1e-5,
-    show_color: bool = False,
+    show_color: bool = True,
+    show_labels: bool = True,
+    show_spheres: bool = True,
 ) -> None:
     """Launch the full-screen terminal viewer."""
 
@@ -1008,6 +1362,8 @@ def run_viewer(
         show_cell=show_cell,
         symprec=symprec,
         show_color=show_color,
+        show_labels=show_labels,
+        show_spheres=show_spheres,
         image_number=image_number,
     )
     app = build_application(state)

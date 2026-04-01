@@ -45,10 +45,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Symmetry tolerance passed to spglib for space-group detection",
     )
     parser.add_argument(
-        "-c",
         "--color",
+        "-c",
+        dest="color",
         action="store_true",
-        help="Start with element colors enabled",
+        default=True,
+        help="Start with element colors enabled (default)",
+    )
+    parser.add_argument(
+        "--no-color",
+        dest="color",
+        action="store_false",
+        help="Start with element colors disabled",
     )
     return parser
 

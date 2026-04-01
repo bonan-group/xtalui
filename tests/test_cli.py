@@ -45,6 +45,18 @@ def test_cli_accepts_color_short_flag() -> None:
     assert args.color is True
 
 
+def test_cli_enables_color_by_default() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["example.cif"])
+    assert args.color is True
+
+
+def test_cli_accepts_no_color_flag() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["example.cif", "--no-color"])
+    assert args.color is False
+
+
 def test_cli_accepts_global_image_number() -> None:
     parser = build_parser()
     args = parser.parse_args(["-n", "1::2", "series.xyz"])

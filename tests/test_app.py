@@ -220,6 +220,19 @@ def test_camera_defaults_show_both_direction_panels() -> None:
     assert camera.show_spheres is False
 
 
+def test_viewer_defaults_enable_color_labels_and_spheres(tmp_path) -> None:
+    path = tmp_path / "si.cif"
+    write(path, bulk("Si", "diamond", a=5.431, cubic=True))
+    state = ViewerState(paths=[path], repeat=(1, 1, 1), show_cell=True, symprec=1e-5, show_color=True)
+
+    assert state.camera.show_color is True
+    assert state.camera.show_labels is True
+    assert state.camera.show_indices is False
+    assert state.camera.show_spheres is True
+    assert f"sphere-scale={state.sphere_scale:.2f}" in state.status()
+    assert "indices=off" in state.status()
+
+
 def test_repeat_command_updates_scene_and_status(tmp_path) -> None:
     path = tmp_path / "si.cif"
     write(path, bulk("Si", "diamond", a=5.431, cubic=True))
@@ -357,6 +370,171 @@ def test_frame_autoplay_rejects_single_frame(tmp_path) -> None:
 
     assert state.frame_autoplay is False
     assert "single-frame structure" in state.status()
+
+
+def test_sphere_scale_command_updates_scale_and_status(tmp_path) -> None:
+    path = tmp_path / "si.cif"
+    write(path, bulk("Si", "diamond", a=5.431, cubic=True))
+    state = ViewerState(paths=[path], repeat=(1, 1, 1), show_cell=True, symprec=1e-5, show_color=True)
+
+    state.begin_sphere_scale_command()
+    state.append_sphere_scale_char("1")
+    state.append_sphere_scale_char(".")
+    state.append_sphere_scale_char("2")
+    state.append_sphere_scale_char("5")
+    state.apply_sphere_scale_command()
+
+    assert state.pending_sphere_scale_command is None
+    assert state.sphere_scale == 1.25
+    assert "sphere scale set to 1.25" in state.status()
+
+
+def test_reset_viewer_restores_default_sphere_scale(tmp_path) -> None:
+    path = tmp_path / "si.cif"
+    write(path, bulk("Si", "diamond", a=5.431, cubic=True))
+    state = ViewerState(paths=[path], repeat=(1, 1, 1), show_cell=True, symprec=1e-5, show_color=True)
+
+    state.begin_sphere_scale_command()
+    state.append_sphere_scale_char("2")
+    state.apply_sphere_scale_command()
+    assert state.sphere_scale == 2.0
+
+    state.reset_viewer()
+
+    assert state.sphere_scale == 0.55
+    assert "sphere-scale=0.55" in state.status()
+
+
+def test_select_command_adds_atom_and_shows_selection_panel(tmp_path) -> None:
+    path = tmp_path / "nacl.cif"
+    write(path, bulk("NaCl", "rocksalt", a=5.64, cubic=True))
+    state = ViewerState(paths=[path], repeat=(1, 1, 1), show_cell=True, symprec=1e-5, show_color=True)
+
+    state.begin_select_command()
+    state.append_index_char("1", mode="select")
+    state.apply_select_command()
+
+    assert state.current_selection() == [0]
+    assert state.show_selection_panel is True
+    assert "selected atom 1" in state.status()
+    assert "pick 1 more atom for a distance" in state.selection_text()
+
+
+def test_selection_buffer_keeps_only_last_three_atoms(tmp_path) -> None:
+    path = tmp_path / "si.cif"
+    write(path, bulk("Si", "diamond", a=5.431, cubic=True))
+    state = ViewerState(paths=[path], repeat=(2, 1, 1), show_cell=True, symprec=1e-5, show_color=True)
+
+    for atom_index in (0, 1, 2, 3):
+        state.append_selected_atom(atom_index)
+
+    assert state.current_selection() == [1, 2, 3]
+
+
+def test_delete_command_removes_selection_by_buffer_position(tmp_path) -> None:
+    path = tmp_path / "si.cif"
+    write(path, bulk("Si", "diamond", a=5.431, cubic=True))
+    state = ViewerState(paths=[path], repeat=(2, 1, 1), show_cell=True, symprec=1e-5, show_color=True)
+    state.frame_selections[state.frame_index] = [0, 1, 2]
+
+    state.begin_delete_command()
+    state.append_index_char("2", mode="delete")
+    state.apply_delete_command()
+
+    assert state.current_selection() == [0, 2]
+    assert "deleted selection entry 2" in state.status()
+
+
+def test_delete_last_selected_atom_behaves_like_dd(tmp_path) -> None:
+    path = tmp_path / "si.cif"
+    write(path, bulk("Si", "diamond", a=5.431, cubic=True))
+    state = ViewerState(paths=[path], repeat=(2, 1, 1), show_cell=True, symprec=1e-5, show_color=True)
+    state.frame_selections[state.frame_index] = [0, 1]
+    state.begin_delete_command()
+
+    state.delete_last_selected_atom()
+
+    assert state.current_selection() == [0]
+    assert state.pending_delete_command is None
+    assert "deleted selection atom 2" in state.status()
+
+
+def test_delete_last_selected_atom_clears_delete_mode_when_empty(tmp_path) -> None:
+    path = tmp_path / "si.cif"
+    write(path, bulk("Si", "diamond", a=5.431, cubic=True))
+    state = ViewerState(paths=[path], repeat=(2, 1, 1), show_cell=True, symprec=1e-5, show_color=True)
+    state.begin_delete_command()
+
+    state.delete_last_selected_atom()
+
+    assert state.current_selection() == []
+    assert state.pending_delete_command is None
+    assert "selection buffer is empty" in state.status()
+
+
+def test_selection_measurements_include_distance_and_angle(tmp_path) -> None:
+    atoms = Atoms(
+        "H3",
+        positions=[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0]],
+        cell=np.zeros((3, 3)),
+        pbc=False,
+    )
+    path = tmp_path / "angle.xyz"
+    write(path, atoms, format="extxyz")
+    state = ViewerState(paths=[path], repeat=(1, 1, 1), show_cell=True, symprec=1e-5, show_color=True)
+    state.frame_selections[state.frame_index] = [0, 1, 2]
+
+    text = state.selection_text()
+
+    assert "d(1,2) =" in text
+    assert "d(2,3) =" in text
+    assert "a(1,2,3) =   90.00 deg" in text
+
+
+def test_selection_panel_yields_to_positions_and_reappears_afterwards(tmp_path) -> None:
+    path = tmp_path / "si.cif"
+    write(path, bulk("Si", "diamond", a=5.431, cubic=True))
+    state = ViewerState(paths=[path], repeat=(1, 1, 1), show_cell=True, symprec=1e-5, show_color=True)
+    state.append_selected_atom(0)
+
+    assert state.show_selection_panel is True
+
+    state.toggle_positions()
+    assert state.show_selection_panel is False
+
+    state.toggle_positions()
+    assert state.show_selection_panel is True
+
+
+def test_selection_persists_per_frame(tmp_path) -> None:
+    atoms_a = bulk("Si", "diamond", a=5.431, cubic=True)
+    atoms_b = bulk("Si", "diamond", a=5.531, cubic=True)
+    path = tmp_path / "series.xyz"
+    write(path, [atoms_a, atoms_b], format="extxyz")
+    state = ViewerState(paths=[path], repeat=(1, 1, 1), show_cell=True, symprec=1e-5, show_color=True)
+
+    state.append_selected_atom(0)
+    state.step_frame(1)
+    state.append_selected_atom(1)
+
+    assert state.current_selection() == [1]
+
+    state.step_frame(-1)
+    assert state.current_selection() == [0]
+
+
+def test_selection_is_cleared_on_repeat_reload(tmp_path) -> None:
+    path = tmp_path / "si.cif"
+    write(path, bulk("Si", "diamond", a=5.431, cubic=True))
+    state = ViewerState(paths=[path], repeat=(1, 1, 1), show_cell=True, symprec=1e-5, show_color=True)
+    state.append_selected_atom(0)
+
+    state.begin_repeat_command()
+    state.append_repeat_digit("2")
+    state.append_repeat_digit("1")
+    state.append_repeat_digit("1")
+
+    assert state.current_selection() == []
 
 
 def test_viewer_state_accepts_multiple_paths_as_frame_series(tmp_path) -> None:

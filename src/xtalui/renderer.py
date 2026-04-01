@@ -50,6 +50,7 @@ BRAILLE_DOTS = {
     (1, 3): 0x80,
 }
 SPHERE_GLYPH = "●"
+SELECTION_STYLE = "fg:#ffd54f"
 TextFragment = tuple[str, str]
 ScreenPoint3D = tuple[float, float, float]
 
@@ -80,6 +81,16 @@ class ProjectedSphere:
     z: float
     radius: float
     style: str
+
+
+def _atom_label(symbol: str, index: int, camera: CameraState) -> str:
+    if camera.show_labels and camera.show_indices:
+        return f"{symbol}{index + 1}"
+    if camera.show_labels:
+        return symbol
+    if camera.show_indices:
+        return str(index + 1)
+    return ""
 
 
 def _project_coords(
@@ -190,6 +201,14 @@ def _element_style(atomic_number: int) -> str:
     return f"fg:#{int(round(red * 255)):02x}{int(round(green * 255)):02x}{int(round(blue * 255)):02x}"
 
 
+def _atom_style(atomic_number: int, atom_index: int, camera: CameraState, options: RenderOptions) -> str:
+    if atom_index in options.selected_indices:
+        return options.selection_style
+    if camera.show_color:
+        return _element_style(atomic_number)
+    return ""
+
+
 def _atom_radius_in_cells(atomic_number: int, scale: float, options: RenderOptions) -> float:
     return max(float(covalent_radii[atomic_number]) * scale * options.atom_radius_scale, 0.75)
 
@@ -295,7 +314,8 @@ def _project_scene(
         x = int(round(screen_x))
         y = int(round(screen_y))
         char = _depth_char(z, z_min, z_max)
-        style = _element_style(scene.atoms[index].number) if camera.show_color else ""
+        label = _atom_label(scene.symbols[index], index, camera)
+        style = _atom_style(scene.atoms[index].number, index, camera, options)
         if camera.show_spheres:
             atom_primitives.extend(
                 _sphere_primitives(x, y, z, SPHERE_GLYPH, scene.atoms[index].number, scale, options, style)
@@ -309,13 +329,11 @@ def _project_scene(
                     style=style,
                 )
             )
-            if camera.show_labels:
-                atom_primitives.append(
-                    RenderPrimitive(x=x, y=y, z=z, char=scene.symbols[index], priority=21, style=style)
-                )
+            if label:
+                atom_primitives.append(RenderPrimitive(x=x, y=y, z=z, char=label, priority=21, style=style))
         else:
-            if camera.show_labels:
-                char = scene.symbols[index]
+            if label:
+                char = label
             atom_primitives.append(RenderPrimitive(x=x, y=y, z=z, char=char, priority=20, style=style))
 
     occupied_cell_labels: set[tuple[int, int]] = set()

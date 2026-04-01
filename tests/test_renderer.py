@@ -16,6 +16,7 @@ from xtalui.renderer import (
     HORIZONTAL_EDGE,
     ORTHOGONAL_CROSS,
     RenderOptions,
+    SELECTION_STYLE,
     VERTICAL_EDGE,
     Viewport,
     _edge_char,
@@ -231,6 +232,38 @@ def test_sphere_mode_renders_atoms_with_multiple_primitives() -> None:
     assert len(primitives) > 1
 
 
+def test_sphere_scale_changes_projected_sphere_size() -> None:
+    atoms = Atoms(
+        symbols=["Si"],
+        positions=[[0.0, 0.0, 0.0]],
+        cell=np.zeros((3, 3)),
+        pbc=False,
+    )
+    scene = SceneData(
+        atoms=atoms,
+        positions=np.asarray(atoms.get_positions(), dtype=float),
+        symbols=list(atoms.get_chemical_symbols()),
+        cell=np.asarray(atoms.cell.array, dtype=float),
+        title="sphere-scale",
+    )
+    viewport = Viewport(width=40, height=20)
+
+    small = build_primitives(
+        scene,
+        CameraState(show_spheres=True, show_bonds=False, show_cell=False),
+        viewport,
+        RenderOptions(atom_radius_scale=0.4),
+    )
+    large = build_primitives(
+        scene,
+        CameraState(show_spheres=True, show_bonds=False, show_cell=False),
+        viewport,
+        RenderOptions(atom_radius_scale=1.2),
+    )
+
+    assert len(large) > len(small)
+
+
 def test_sphere_mode_uses_constant_glyph_in_unicode_mode() -> None:
     atoms = Atoms(
         symbols=["C", "O"],
@@ -298,6 +331,80 @@ def test_nearer_atom_wins_depth_buffer() -> None:
     primitives = build_primitives(scene, camera, viewport)
     front = max(primitives, key=lambda item: item.z)
     assert rows[front.y][front.x] == "O"
+
+
+def test_indices_can_be_rendered_alongside_labels() -> None:
+    atoms = Atoms(
+        symbols=["C"],
+        positions=[[0.0, 0.0, 0.0]],
+        cell=np.zeros((3, 3)),
+        pbc=False,
+    )
+    scene = SceneData(
+        atoms=atoms,
+        positions=np.asarray(atoms.get_positions(), dtype=float),
+        symbols=list(atoms.get_chemical_symbols()),
+        cell=np.asarray(atoms.cell.array, dtype=float),
+        title="indices",
+    )
+    primitives = build_primitives(
+        scene,
+        CameraState(show_cell=False, show_bonds=False, show_spheres=False, show_labels=True, show_indices=True),
+        Viewport(width=21, height=11),
+    )
+
+    atom_labels = [primitive.char for primitive in primitives if primitive.priority == 20]
+    assert "C1" in atom_labels
+
+
+def test_selected_atom_uses_highlight_style_in_point_mode() -> None:
+    atoms = Atoms(
+        symbols=["C"],
+        positions=[[0.0, 0.0, 0.0]],
+        cell=np.zeros((3, 3)),
+        pbc=False,
+    )
+    scene = SceneData(
+        atoms=atoms,
+        positions=np.asarray(atoms.get_positions(), dtype=float),
+        symbols=list(atoms.get_chemical_symbols()),
+        cell=np.asarray(atoms.cell.array, dtype=float),
+        title="selected-point",
+    )
+
+    fragments = render_formatted(
+        scene,
+        CameraState(show_cell=False, show_bonds=False, show_labels=True),
+        Viewport(width=21, height=11),
+        RenderOptions(selected_indices=frozenset({0})),
+    )
+
+    assert any(style == SELECTION_STYLE and "C" in text for style, text in fragments)
+
+
+def test_selected_atom_uses_highlight_style_in_sphere_mode() -> None:
+    atoms = Atoms(
+        symbols=["C"],
+        positions=[[0.0, 0.0, 0.0]],
+        cell=np.zeros((3, 3)),
+        pbc=False,
+    )
+    scene = SceneData(
+        atoms=atoms,
+        positions=np.asarray(atoms.get_positions(), dtype=float),
+        symbols=list(atoms.get_chemical_symbols()),
+        cell=np.asarray(atoms.cell.array, dtype=float),
+        title="selected-sphere",
+    )
+
+    fragments = render_formatted(
+        scene,
+        CameraState(show_cell=False, show_bonds=False, show_spheres=True, line_mode="unicode"),
+        Viewport(width=21, height=11),
+        RenderOptions(selected_indices=frozenset({0})),
+    )
+
+    assert any(style == SELECTION_STYLE and "●" in text for style, text in fragments)
 
 
 def test_scene_radius_is_rotation_invariant() -> None:
