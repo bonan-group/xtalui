@@ -34,6 +34,7 @@ dev = ["pytest>=8.0", "ruff>=0.6"]
 
 [project.scripts]
 xtal = "xtalui.cli:main"
+tpot = "xtalui.plot.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/bonan-group/xtalui"
