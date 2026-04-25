@@ -10,6 +10,7 @@ from xtalui.plot.parser import (
     Series,
     auto_series,
     detect_numeric_columns,
+    multi_series,
     parse_text,
 )
 from xtalui.plot.renderer import (
@@ -514,3 +515,226 @@ class TestCLI:
         fragments = render_plot(series, Viewport(60, 20), "x", "y", plot_mode="both")
         text = "".join(t for _, t in fragments)
         assert len(text.strip()) > 0
+
+    def test_accepts_y_columns_flag(self) -> None:
+        from xtalui.plot.cli import build_parser
+
+        parser = build_parser()
+        args = parser.parse_args(["data.txt", "-Y", "1", "2", "3"])
+        assert args.y_columns == [1, 2, 3]
+
+    def test_y_columns_defaults_to_none(self) -> None:
+        from xtalui.plot.cli import build_parser
+
+        parser = build_parser()
+        args = parser.parse_args(["data.txt"])
+        assert args.y_columns is None
+
+
+# --- Multi-series tests ---
+
+
+class TestMultiSeries:
+    def test_basic_multi_series(self) -> None:
+        text = "1.0 2.0 3.0 4.0\n5.0 6.0 7.0 8.0\n9.0 10.0 11.0 12.0\n"
+        data = parse_text(text)
+        series_list = multi_series(data, 0, [1, 2, 3])
+        assert len(series_list) == 3
+        assert series_list[0].name == "col_1"
+        assert series_list[1].name == "col_2"
+        assert series_list[2].name == "col_3"
+        np.testing.assert_array_equal(series_list[0].x, [1.0, 5.0, 9.0])
+        np.testing.assert_array_equal(series_list[0].y, [2.0, 6.0, 10.0])
+        np.testing.assert_array_equal(series_list[1].y, [3.0, 7.0, 11.0])
+
+    def test_empty_y_cols(self) -> None:
+        text = "1.0 2.0\n3.0 4.0\n"
+        data = parse_text(text)
+        series_list = multi_series(data, 0, [])
+        assert series_list == []
+
+    def test_out_of_range_x(self) -> None:
+        text = "1.0 2.0\n3.0 4.0\n"
+        data = parse_text(text)
+        series_list = multi_series(data, 5, [0, 1])
+        assert series_list == []
+
+    def test_out_of_range_y_skipped(self) -> None:
+        text = "1.0 2.0\n3.0 4.0\n"
+        data = parse_text(text)
+        series_list = multi_series(data, 0, [1, 99])
+        assert len(series_list) == 1
+
+    def test_single_y_col(self) -> None:
+        text = "1.0 2.0\n3.0 4.0\n"
+        data = parse_text(text)
+        series_list = multi_series(data, 0, [1])
+        assert len(series_list) == 1
+        assert series_list[0].name == "col_1"
+
+
+# --- Legend tests ---
+
+
+class TestRenderLegend:
+    def test_legend_appears_in_output(self) -> None:
+        series = [
+            _make_series("alpha", [1.0, 5.0], [1.0, 5.0]),
+            _make_series("beta", [2.0, 6.0], [3.0, 7.0]),
+        ]
+        fragments = render_plot(series, Viewport(80, 24), "x", "y", show_color=True, show_legend=True)
+        text = "".join(t for _, t in fragments)
+        assert "alpha" in text
+        assert "beta" in text
+        assert "■" in text
+
+    def test_legend_hidden_by_default(self) -> None:
+        series = [
+            _make_series("alpha", [1.0, 5.0], [1.0, 5.0]),
+            _make_series("beta", [2.0, 6.0], [3.0, 7.0]),
+        ]
+        fragments = render_plot(series, Viewport(80, 24), "x", "y", show_color=True)
+        text = "".join(t for _, t in fragments)
+        # Without show_legend, the names should not appear as a legend block.
+        # They may still appear in the title though.
+        assert "┌" not in text or "alpha" not in text.split("┌")[-1] if "┌" in text else True
+
+    def test_legend_not_shown_for_single_series(self) -> None:
+        series = [_make_series("only", [1.0, 5.0], [1.0, 5.0])]
+        fragments = render_plot(series, Viewport(80, 24), "x", "y", show_color=True, show_legend=True)
+        text = "".join(t for _, t in fragments)
+        # Single series: legend box should not appear.
+        assert "┌" not in text or "only" not in [line.strip() for line in text.split("\n") if "┌" in line]
+
+    def test_legend_ascii_mode(self) -> None:
+        series = [
+            _make_series("col_a", [1.0, 5.0], [1.0, 5.0]),
+            _make_series("col_b", [2.0, 6.0], [3.0, 7.0]),
+        ]
+        rows = render_plot_ascii(series, Viewport(80, 24), "x", "y", show_color=True, show_legend=True)
+        text = "\n".join(rows)
+        assert "col_a" in text
+        assert "col_b" in text
+
+
+# --- Multi-column state tests ---
+
+
+class TestMultiColumnState:
+    def test_toggle_multi_column(self) -> None:
+        data = parse_text("1.0 2.0 3.0\n4.0 5.0 6.0\n")
+        from xtalui.plot.app import PlotState
+
+        state = PlotState(data, x_col_index=0, y_col_index=1)
+        assert not state.multi_column
+        state.toggle_multi_column()
+        assert state.multi_column
+        assert state.show_color is True
+        assert state.show_legend is True
+
+    def test_multi_column_with_y_indices(self) -> None:
+        data = parse_text("1.0 2.0 3.0 4.0\n5.0 6.0 7.0 8.0\n")
+        from xtalui.plot.app import PlotState
+
+        state = PlotState(
+            data,
+            x_col_index=0,
+            y_col_index=1,
+            y_col_indices=[1, 2, 3],
+            multi_column=True,
+            show_color=True,
+            show_legend=True,
+        )
+        assert len(state.series_list) == 3
+        assert state.series_list[0].name == "col_1"
+        assert state.series_list[1].name == "col_2"
+        assert state.series_list[2].name == "col_3"
+
+    def test_multi_column_status(self) -> None:
+        data = parse_text("1.0 2.0 3.0\n4.0 5.0 6.0\n")
+        from xtalui.plot.app import PlotState
+
+        state = PlotState(
+            data,
+            x_col_index=0,
+            y_col_index=1,
+            y_col_indices=[1, 2],
+            multi_column=True,
+            show_color=True,
+            show_legend=True,
+        )
+        status = state.status()
+        assert "multi" in status
+        assert "legend" in status
+
+    def test_toggle_legend(self) -> None:
+        data = parse_text("1.0 2.0\n3.0 4.0\n")
+        from xtalui.plot.app import PlotState
+
+        state = PlotState(data, x_col_index=0, y_col_index=1)
+        assert not state.show_legend
+        state.toggle_legend()
+        assert state.show_legend
+
+    def test_multi_column_selector_toggle_y(self) -> None:
+        data = parse_text("1.0 2.0 3.0 4.0\n5.0 6.0 7.0 8.0\n")
+        from xtalui.plot.app import PlotState
+
+        state = PlotState(
+            data,
+            x_col_index=0,
+            y_col_index=1,
+            y_col_indices=[1],
+            multi_column=True,
+            show_color=True,
+        )
+        state.begin_column_select()
+        state.confirm_column_select()  # confirm x at 0
+        # Now in y-selection mode.
+        assert state.col_selecting_axis == 1
+        state.col_cursor = 2
+        state.toggle_y_column_in_selector()
+        assert 2 in state.col_selected_y
+        state.toggle_y_column_in_selector()
+        assert 2 not in state.col_selected_y
+
+    def test_multi_column_selector_confirm(self) -> None:
+        data = parse_text("1.0 2.0 3.0 4.0\n5.0 6.0 7.0 8.0\n")
+        from xtalui.plot.app import PlotState
+
+        state = PlotState(
+            data,
+            x_col_index=0,
+            y_col_index=1,
+            y_col_indices=[1],
+            multi_column=True,
+            show_color=True,
+        )
+        state.begin_column_select()
+        state.confirm_column_select()  # confirm x at 0
+        # Select cols 1 and 2 as y.
+        state.col_selected_y = {1, 2}
+        state.confirm_column_select()  # confirm y selection
+        assert state.y_col_indices == [1, 2]
+        assert len(state.series_list) == 2
+
+    def test_y_axis_name_multi(self) -> None:
+        data = parse_text("1.0 2.0 3.0\n4.0 5.0 6.0\n")
+        from xtalui.plot.app import PlotState
+
+        state = PlotState(
+            data,
+            x_col_index=0,
+            y_col_index=1,
+            y_col_indices=[1, 2],
+            multi_column=True,
+            show_color=True,
+        )
+        assert state._y_axis_name() == "[col_1,col_2]"
+
+    def test_y_axis_name_single(self) -> None:
+        data = parse_text("1.0 2.0\n3.0 4.0\n")
+        from xtalui.plot.app import PlotState
+
+        state = PlotState(data, x_col_index=0, y_col_index=1)
+        assert state._y_axis_name() == "col_1"

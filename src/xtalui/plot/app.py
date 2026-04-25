@@ -10,7 +10,7 @@ from prompt_toolkit.layout import ConditionalContainer, Float, FloatContainer, H
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.layout.controls import FormattedTextControl
 
-from xtalui.plot.parser import ParsedData, Series, auto_series, detect_numeric_columns
+from xtalui.plot.parser import ParsedData, Series, auto_series, detect_numeric_columns, multi_series
 from xtalui.plot.renderer import (
     PlotBounds,
     PlotMode,
@@ -40,21 +40,27 @@ class PlotState:
         data: ParsedData,
         x_col_index: int = 0,
         y_col_index: int = 1,
+        y_col_indices: list[int] | None = None,
+        multi_column: bool = False,
         show_grid: bool = True,
         plot_mode: PlotMode = "scatter",
         x_scale: ScaleType = "linear",
         y_scale: ScaleType = "linear",
         show_color: bool = False,
+        show_legend: bool = False,
     ) -> None:
         self.data = data
         self.columns = detect_numeric_columns(data)
         self.x_col_index = x_col_index
         self.y_col_index = y_col_index
+        self.y_col_indices: list[int] = y_col_indices if y_col_indices is not None else [y_col_index]
+        self.multi_column = multi_column
         self.zoom: float = 1.0
         self.pan_x: float = 0.0
         self.pan_y: float = 0.0
         self.show_grid = show_grid
         self.show_color = show_color
+        self.show_legend = show_legend
         self.plot_mode = plot_mode
         self.x_scale = x_scale
         self.y_scale = y_scale
@@ -65,10 +71,14 @@ class PlotState:
         self.col_selecting_axis = COLUMN_SELECTOR_X_COL  # 0 = picking x, 1 = picking y
         self._pending_x: int | None = None
         self._custom_bounds: PlotBounds | None = None
+        self.col_selected_y: set[int] = set()
         self._refresh_series()
 
     def _refresh_series(self) -> None:
-        self.series_list: list[Series] = auto_series(self.data, self.x_col_index, self.y_col_index)
+        if self.multi_column and len(self.y_col_indices) > 1:
+            self.series_list: list[Series] = multi_series(self.data, self.x_col_index, self.y_col_indices)
+        else:
+            self.series_list = auto_series(self.data, self.x_col_index, self.y_col_index)
         self._auto_bounds = self._compute_auto_bounds()
 
     def _compute_auto_bounds(self) -> PlotBounds:
@@ -120,14 +130,21 @@ class PlotState:
             self.series_list,
             viewport,
             self.columns[self.x_col_index].name if self.x_col_index < len(self.columns) else "?",
-            self.columns[self.y_col_index].name if self.y_col_index < len(self.columns) else "?",
+            self._y_axis_name(),
             bounds=self.effective_bounds,
             show_grid=self.show_grid,
             show_color=self.show_color,
             plot_mode=self.plot_mode,
             x_scale=self.x_scale,
             y_scale=self.y_scale,
+            show_legend=self.show_legend,
         )
+
+    def _y_axis_name(self) -> str:
+        if self.multi_column and len(self.y_col_indices) > 1:
+            names = [self.columns[i].name for i in self.y_col_indices if i < len(self.columns)]
+            return "[" + ",".join(names) + "]"
+        return self.columns[self.y_col_index].name if self.y_col_index < len(self.columns) else "?"
 
     def render_ascii(self, width: int, height: int, bounds: PlotBounds | None = None) -> list[str]:
         viewport = Viewport(width=width, height=height)
@@ -135,13 +152,14 @@ class PlotState:
             self.series_list,
             viewport,
             self.columns[self.x_col_index].name if self.x_col_index < len(self.columns) else "?",
-            self.columns[self.y_col_index].name if self.y_col_index < len(self.columns) else "?",
+            self._y_axis_name(),
             bounds=bounds if bounds is not None else self.effective_bounds,
             show_grid=self.show_grid,
             show_color=self.show_color,
             plot_mode=self.plot_mode,
             x_scale=self.x_scale,
             y_scale=self.y_scale,
+            show_legend=self.show_legend,
         )
 
     def zoom_in(self) -> None:
@@ -173,6 +191,24 @@ class PlotState:
         self.show_color = not self.show_color
         self.status_message = f"color {'on' if self.show_color else 'off'}"
 
+    def toggle_multi_column(self) -> None:
+        self.multi_column = not self.multi_column
+        if self.multi_column:
+            if len(self.y_col_indices) <= 1:
+                self.y_col_indices = [self.y_col_index]
+            self.show_color = True
+            self.show_legend = True
+            self.status_message = "multi-column on (press c to add y-columns)"
+        else:
+            self.y_col_indices = [self.y_col_index]
+            self.show_legend = False
+            self.status_message = "multi-column off"
+        self._refresh_series()
+
+    def toggle_legend(self) -> None:
+        self.show_legend = not self.show_legend
+        self.status_message = f"legend {'on' if self.show_legend else 'off'}"
+
     def toggle_plot_mode(self) -> None:
         modes = ["scatter", "line", "both"]
         idx = modes.index(self.plot_mode)
@@ -196,6 +232,7 @@ class PlotState:
         self.col_cursor = self.x_col_index
         self.col_selecting_axis = COLUMN_SELECTOR_X_COL
         self._pending_x = None
+        self.col_selected_y = set(self.y_col_indices)
         self.status_message = "selecting x-axis column"
 
     def confirm_column_select(self) -> None:
@@ -204,21 +241,45 @@ class PlotState:
             self._pending_x = idx
             self.col_selecting_axis = COLUMN_SELECTOR_Y_COL
             self.col_cursor = self.y_col_index
+            self.col_selected_y = set(self.y_col_indices)
             self.status_message = f"x={self.columns[idx].name} — now selecting y-axis column"
         else:
             x_idx = self._pending_x if self._pending_x is not None else self.x_col_index
-            y_idx = idx
-            self.x_col_index = x_idx
-            self.y_col_index = y_idx
-            self._refresh_series()
+            if self.multi_column:
+                self.x_col_index = x_idx
+                if self.col_selected_y:
+                    self.y_col_indices = sorted(self.col_selected_y)
+                    self.y_col_index = self.y_col_indices[0]
+                else:
+                    self.status_message = "select at least one y-column"
+                    return
+                self._refresh_series()
+            else:
+                y_idx = idx
+                self.x_col_index = x_idx
+                self.y_col_index = y_idx
+                self.y_col_indices = [y_idx]
+                self._refresh_series()
             self.column_select_mode = False
             self._pending_x = None
-            self.status_message = f"x={self.columns[x_idx].name}, y={self.columns[y_idx].name}"
+            self.col_selected_y = set()
+            self.status_message = f"x={self.columns[self.x_col_index].name}, y={self._y_axis_name()}"
 
     def cancel_column_select(self) -> None:
         self.column_select_mode = False
         self._pending_x = None
+        self.col_selected_y = set()
         self.status_message = "cancelled"
+
+    def toggle_y_column_in_selector(self) -> None:
+        """Toggle the cursor column in the y-selection set (multi-column mode only)."""
+        if not self.column_select_mode or self.col_selecting_axis != COLUMN_SELECTOR_Y_COL:
+            return
+        idx = self.col_cursor
+        if idx in self.col_selected_y:
+            self.col_selected_y.discard(idx)
+        else:
+            self.col_selected_y.add(idx)
 
     def col_move_up(self) -> None:
         if self.col_cursor > 0:
@@ -230,10 +291,14 @@ class PlotState:
 
     def status(self) -> str:
         x_name = self.columns[self.x_col_index].name if self.x_col_index < len(self.columns) else "?"
-        y_name = self.columns[self.y_col_index].name if self.y_col_index < len(self.columns) else "?"
+        if self.multi_column and len(self.y_col_indices) > 1:
+            y_str = "[" + ",".join(str(i) for i in self.y_col_indices) + "]"
+        else:
+            y_name = self.columns[self.y_col_index].name if self.y_col_index < len(self.columns) else "?"
+            y_str = f"{y_name}({self.y_col_index})"
         parts = [
             f"x={x_name}({self.x_col_index})",
-            f"y={y_name}({self.y_col_index})",
+            f"y={y_str}",
             f"zoom={self.zoom:.2f}",
             f"{self.plot_mode}",
             f"x:{self.x_scale}",
@@ -243,6 +308,10 @@ class PlotState:
             f"series={len(self.series_list)}",
             f"pts={sum(len(s.x) for s in self.series_list)}",
         ]
+        if self.multi_column:
+            parts.append("multi")
+        if self.show_legend:
+            parts.append("legend")
         if self.status_message:
             parts.append(self.status_message)
         return "  ".join(parts)
@@ -261,7 +330,8 @@ class PlotState:
         if not self.show_help:
             return ""
         return (
-            "Arrow=pan  +/-=zoom  m=scatter/line  g=grid  X=x-scale  Y=y-scale  c=columns  Ctrl-R=reset  ?=help  q=quit"
+            "Arrow=pan  +/-=zoom  m=scatter/line  g=grid  M=multi-col  L=legend  "
+            "X=x-scale  Y=y-scale  C=color  c=columns  Ctrl-R=reset  ?=help  q=quit"
         )
 
     def column_selector_text(self) -> str:
@@ -311,7 +381,10 @@ class PlotState:
             x_name = self.columns[self._pending_x].name if self._pending_x is not None else "?"
             add("  X = ", SELECTED_X_STYLE)
             add(f"{x_name}")
-            add(f"  |  Select Y-AXIS column (arrows+enter, or digit 0-{n - 1}):\n")
+            if self.multi_column:
+                add("  |  Select Y-AXIS columns (Space=toggle, Enter=done):\n")
+            else:
+                add(f"  |  Select Y-AXIS column (arrows+enter, or digit 0-{n - 1}):\n")
 
         header = f"  {'':>3s}  {'Column':<30s}  {'Min':>14s}  {'Max':>14s}  {'Count':>6s}"
         add(header + "\n")
@@ -320,13 +393,21 @@ class PlotState:
 
         for i, col in enumerate(self.columns):
             is_cursor = i == self.col_cursor
-            prefix = " "
-            if i == self.x_col_index and i == self.y_col_index:
-                prefix = "x,y"
-            elif i == self.x_col_index:
-                prefix = "x  "
-            elif i == self.y_col_index:
-                prefix = " y "
+
+            if self.col_selecting_axis == COLUMN_SELECTOR_Y_COL and self.multi_column:
+                # Multi-select mode: show check marks.
+                if i in self.col_selected_y:
+                    prefix = "Y* "
+                else:
+                    prefix = "   "
+            else:
+                prefix = " "
+                if i == self.x_col_index and i == self.y_col_index:
+                    prefix = "x,y"
+                elif i == self.x_col_index:
+                    prefix = "x  "
+                elif i == self.y_col_index:
+                    prefix = " y "
 
             name = col.name[:30].ljust(30)
             mn = f"{min(col.values):>14.6g}" if col.values else f"{'—':>14s}"
@@ -337,6 +418,9 @@ class PlotState:
                 add("  >>> ", HIGHLIGHT_STYLE)
                 if self.col_selecting_axis == COLUMN_SELECTOR_X_COL:
                     add("[X] ", HIGHLIGHT_STYLE)
+                elif self.multi_column:
+                    check = "*" if i in self.col_selected_y else " "
+                    add(f"[{check}] ", HIGHLIGHT_STYLE)
                 else:
                     add("[Y] ", HIGHLIGHT_STYLE)
                 add(f"{name}  {mn}  {mx}  {cnt}", HIGHLIGHT_STYLE)
@@ -347,6 +431,8 @@ class PlotState:
         add("\n")
         if self.col_selecting_axis == COLUMN_SELECTOR_X_COL:
             add("  Enter=confirm x  Esc=cancel  or type digit to jump\n")
+        elif self.multi_column:
+            add("  Space=toggle  Enter=confirm & plot  Esc=cancel\n")
         else:
             add("  Enter=confirm y & plot  Esc=cancel  or type digit to jump\n")
 
@@ -481,6 +567,16 @@ def build_plot_application(state: PlotState) -> Application:
         state.toggle_y_scale()
         event.app.invalidate()
 
+    @bindings.add("M")
+    def _toggle_multi(event: object) -> None:
+        state.toggle_multi_column()
+        event.app.invalidate()
+
+    @bindings.add("L")
+    def _toggle_legend(event: object) -> None:
+        state.toggle_legend()
+        event.app.invalidate()
+
     @bindings.add("c")
     def _column_select(event: object) -> None:
         state.begin_column_select()
@@ -517,6 +613,12 @@ def build_plot_application(state: PlotState) -> Application:
     def _col_cancel(event: object) -> None:
         state.cancel_column_select()
         event.app.invalidate()
+
+    @bindings.add("space", filter=Condition(lambda: state.column_select_mode), eager=True)
+    def _col_toggle_y(event: object) -> None:
+        if state.multi_column and state.col_selecting_axis == COLUMN_SELECTOR_Y_COL:
+            state.toggle_y_column_in_selector()
+            event.app.invalidate()
 
     @bindings.add("<any>", filter=Condition(lambda: state.column_select_mode), eager=True)
     def _col_digit(event: object) -> None:

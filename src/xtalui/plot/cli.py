@@ -14,6 +14,7 @@ EPILOG = """\
 examples:
   tpot data.txt                        Interactive plot, auto-detect columns
   tpot data.txt -x 0 -y 3             Plot column 0 vs column 3
+  tpot data.txt -Y 1 2 3              Multi-column: plot cols 1,2,3 vs col 0
   tpot data.txt --line                 Start in line mode
   tpot data.txt --log-x --log-y        Start with log axes
   tpot data.txt --ascii                Plain text output to stdout
@@ -26,6 +27,8 @@ interactive controls:
   +/-           Zoom in/out
   m             Toggle scatter/line mode
   g             Toggle grid lines
+  M             Toggle multi-column mode
+  L             Toggle legend
   C             Toggle colors
   X / Y         Toggle x/y axis between linear and log scale
   c             Open column selector
@@ -65,6 +68,15 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="IDX",
         help="0-based index of the numeric column for the y-axis (default: 1).",
+    )
+    parser.add_argument(
+        "-Y",
+        "--y-columns",
+        type=int,
+        nargs="+",
+        default=None,
+        metavar="IDX",
+        help="0-based indices of multiple y-axis columns for multi-column mode.",
     )
     parser.add_argument(
         "--xmin",
@@ -149,9 +161,14 @@ def main() -> None:
     x_col = args.x_column if args.x_column is not None else 0
     y_col = args.y_column if args.y_column is not None else 1
 
-    if x_col >= len(columns) or y_col >= len(columns):
+    multi_column = args.y_columns is not None
+    y_col_indices = args.y_columns if args.y_columns is not None else [y_col]
+
+    # Validate indices.
+    all_indices = [x_col] + y_col_indices
+    if any(idx < 0 or idx >= len(columns) for idx in all_indices):
         print(
-            f"Error: column indices must be in 0..{len(columns) - 1}, got x={x_col}, y={y_col}",
+            f"Error: column indices must be in 0..{len(columns) - 1}",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -162,12 +179,15 @@ def main() -> None:
     state = PlotState(
         data,
         x_col_index=x_col,
-        y_col_index=y_col,
+        y_col_index=y_col_indices[0],
+        y_col_indices=y_col_indices,
+        multi_column=multi_column,
         show_grid=not args.no_grid,
         plot_mode="line" if args.line else "scatter",
         x_scale=x_scale,
         y_scale=y_scale,
-        show_color=args.color,
+        show_color=args.color or multi_column,
+        show_legend=multi_column,
     )
 
     # Build explicit bounds from CLI limits, if any were provided.

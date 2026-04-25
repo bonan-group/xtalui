@@ -156,6 +156,34 @@ def parse_file(path: Path) -> ParsedData:
     return parse_text(text, source_name=str(path))
 
 
+def multi_series(data: ParsedData, x_col: int, y_cols: list[int]) -> list[Series]:
+    """Create one Series per y-column, all sharing the same x-column.
+
+    Unlike auto_series, this does NOT detect grouping columns. Each y-col
+    produces exactly one Series whose name is the column name.
+    """
+    columns = list(data.columns)
+    if x_col < 0 or x_col >= len(columns):
+        return []
+    result: list[Series] = []
+    x_values = columns[x_col].values
+    for y_col in y_cols:
+        if y_col < 0 or y_col >= len(columns):
+            continue
+        y_values = columns[y_col].values
+        n = min(len(x_values), len(y_values))
+        if n == 0:
+            continue
+        result.append(
+            Series(
+                name=columns[y_col].name,
+                x=np.array(x_values[:n]),
+                y=np.array(y_values[:n]),
+            )
+        )
+    return result
+
+
 def parse_stdin() -> ParsedData:
     """Read from stdin (for piped input)."""
     import sys

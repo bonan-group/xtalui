@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Literal
+from typing import Callable, Literal
 
 import numpy as np
 
@@ -290,6 +290,61 @@ def _braille_lines(
     return rows, styles
 
 
+def _render_legend(
+    series_list: list,
+    series_colors: list[str],
+    show_color: bool,
+    layout: PlotLayout,
+    viewport_width: int,
+    set_char: Callable[[int, int, str, str], None],
+) -> None:
+    """Overlay a compact legend in the top-right corner of the plot area."""
+    if len(series_list) < 2:
+        return
+
+    # Compute legend dimensions.
+    max_name_width = min(max(len(s.name) for s in series_list), 20)
+    box_inner_width = max_name_width + 4  # "■ " + name + padding
+    box_width = box_inner_width + 2  # +2 for border chars
+    n_entries = min(len(series_list), (layout.plot_bottom - layout.plot_top) // 2)
+    box_height = n_entries + 2  # +2 for top/bottom border
+
+    # Position: top-right of plot area with 2-cell padding.
+    box_right = min(layout.plot_right - 2, viewport_width - 1)
+    box_left = box_right - box_width + 1
+    box_top = layout.plot_top + 1
+    box_bottom = box_top + box_height - 1
+
+    if box_left < layout.plot_left + 2:
+        return  # Not enough room.
+
+    # Draw border.
+    set_char(box_top, box_left, "┌")
+    set_char(box_top, box_right, "┐")
+    set_char(box_bottom, box_left, "└")
+    set_char(box_bottom, box_right, "┘")
+    for cx in range(box_left + 1, box_right):
+        set_char(box_top, cx, "─")
+        set_char(box_bottom, cx, "─")
+    for ry in range(box_top + 1, box_bottom):
+        set_char(ry, box_left, "│")
+        set_char(ry, box_right, "│")
+        # Clear interior to prevent data from showing through.
+        for cx in range(box_left + 1, box_right):
+            set_char(ry, cx, " ")
+
+    # Draw entries.
+    for i in range(n_entries):
+        name = series_list[i].name[:max_name_width]
+        color = series_colors[i] if show_color else ""
+        row = box_top + 1 + i
+        # Swatch.
+        set_char(row, box_left + 2, "■", color)
+        # Name.
+        for j, ch in enumerate(name):
+            set_char(row, box_left + 4 + j, ch, color)
+
+
 def render_plot(
     series_list: list,
     viewport: Viewport,
@@ -301,6 +356,7 @@ def render_plot(
     plot_mode: PlotMode = "scatter",
     x_scale: ScaleType = "linear",
     y_scale: ScaleType = "linear",
+    show_legend: bool = False,
 ) -> list[TextFragment]:
     """Render a scatter/line plot as styled text fragments for prompt_toolkit."""
 
@@ -470,7 +526,6 @@ def render_plot(
         scaled_series_points.append(pts)
 
     if plot_width > 0 and plot_height > 0:
-
         if plot_mode == "scatter":
             all_pts: list[tuple[float, float]] = []
             all_colors: list[str] = []
@@ -491,9 +546,7 @@ def render_plot(
             for pts, color in zip(scaled_series_points, series_colors):
                 all_pts.extend(pts)
                 all_colors.extend([color] * len(pts))
-            dot_rows, dot_styles = _braille_scatter(
-                plot_width, plot_height, all_pts, all_colors, bounds, layout
-            )
+            dot_rows, dot_styles = _braille_scatter(plot_width, plot_height, all_pts, all_colors, bounds, layout)
             # Merge: dot content overwrites line content.
             for cy in range(min(len(dot_rows), len(braille_rows))):
                 for cx in range(min(len(dot_rows[cy]), len(braille_rows[cy]))):
@@ -518,6 +571,10 @@ def render_plot(
                     buffer[screen_row][screen_col] = ch
                     if braille_styles[by][bx]:
                         styles[screen_row][screen_col] = braille_styles[by][bx]
+
+    # Draw legend.
+    if show_legend:
+        _render_legend(series_list, series_colors, show_color, layout, viewport.width, set_char)
 
     # Convert buffer to TextFragment list.
     fragments: list[TextFragment] = []
@@ -549,6 +606,7 @@ def render_plot_ascii(
     plot_mode: PlotMode = "scatter",
     x_scale: ScaleType = "linear",
     y_scale: ScaleType = "linear",
+    show_legend: bool = False,
 ) -> list[str]:
     """Render a plot as plain text rows (no style metadata)."""
     fragments = render_plot(
@@ -562,6 +620,7 @@ def render_plot_ascii(
         plot_mode=plot_mode,
         x_scale=x_scale,
         y_scale=y_scale,
+        show_legend=show_legend,
     )
     text = "".join(t for _, t in fragments)
     return text.split("\n")
