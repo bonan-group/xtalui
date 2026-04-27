@@ -922,6 +922,7 @@ def build_application(state: ViewerState) -> Application:
         ),
         filter=Condition(lambda: state.camera.show_xyz_panel),
     )
+
     def _info_visible():
         if not state.camera.show_info:
             return False
