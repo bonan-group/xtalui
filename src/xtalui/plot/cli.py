@@ -17,6 +17,7 @@ examples:
   tpot data.txt -Y 1 2 3              Multi-column: plot cols 1,2,3 vs col 0
   tpot data.txt --line                 Start in line mode
   tpot data.txt --log-x --log-y        Start with log axes
+  tpot data.txt --group                Enable auto series grouping
   tpot data.txt --ascii                Plain text output to stdout
   tpot data.txt --ascii --xmin 0 --xmax 100 --ymin 0 --ymax 1
   tpot data.txt --ascii --color        Enable colored output
@@ -28,6 +29,7 @@ interactive controls:
   m             Toggle scatter/line mode
   g             Toggle grid lines
   M             Toggle multi-column mode
+  G             Toggle auto series grouping
   L             Toggle legend
   C             Toggle colors
   X / Y         Toggle x/y axis between linear and log scale
@@ -137,6 +139,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Use line plot mode (default: scatter).",
     )
+    parser.add_argument(
+        "--group",
+        dest="group",
+        action="store_true",
+        help="Enable automatic series grouping by non-numeric columns.",
+    )
     return parser
 
 
@@ -163,6 +171,9 @@ def main() -> None:
 
     multi_column = args.y_columns is not None
     y_col_indices = args.y_columns if args.y_columns is not None else [y_col]
+    if not y_col_indices:
+        print("Error: at least one y-column is required", file=sys.stderr)
+        sys.exit(1)
 
     # Validate indices.
     all_indices = [x_col] + y_col_indices
@@ -188,6 +199,7 @@ def main() -> None:
         y_scale=y_scale,
         show_color=args.color or multi_column,
         show_legend=multi_column,
+        auto_group=args.group,
     )
 
     # Build explicit bounds from CLI limits, if any were provided.
@@ -201,6 +213,12 @@ def main() -> None:
         b_xmax = args.xmax if args.xmax is not None else float(np.max(all_x))
         b_ymin = args.ymin if args.ymin is not None else float(np.min(all_y))
         b_ymax = args.ymax if args.ymax is not None else float(np.max(all_y))
+        if args.xmin is not None and args.xmax is not None and b_xmin >= b_xmax:
+            print("Error: --xmin must be less than --xmax", file=sys.stderr)
+            sys.exit(1)
+        if args.ymin is not None and args.ymax is not None and b_ymin >= b_ymax:
+            print("Error: --ymin must be less than --ymax", file=sys.stderr)
+            sys.exit(1)
         bounds = PlotBounds(x_min=b_xmin, x_max=b_xmax, y_min=b_ymin, y_max=b_ymax)
 
     # Non-interactive mode: piped stdin or piped stdout or explicit --ascii.

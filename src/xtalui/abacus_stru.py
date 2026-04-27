@@ -48,7 +48,10 @@ def read_abacus_stru(path: Path) -> Atoms:
     if "ATOMIC_POSITIONS" not in blocks:
         raise ValueError(f"{path} is missing the ATOMIC_POSITIONS block")
 
-    lattice_constant = float(blocks["LATTICE_CONSTANT"][0])
+    try:
+        lattice_constant = float(blocks["LATTICE_CONSTANT"][0])
+    except (IndexError, ValueError) as exc:
+        raise ValueError(f"{path}: invalid LATTICE_CONSTANT block") from exc
     cell = _cell_from_blocks(blocks, lattice_constant)
     species_order = _parse_species_order(blocks["ATOMIC_SPECIES"])
     symbols, positions = _parse_positions(blocks["ATOMIC_POSITIONS"], species_order, lattice_constant, cell)
@@ -78,9 +81,14 @@ def _read_blocks(path: Path) -> dict[str, list[str]]:
 
 def _cell_from_blocks(blocks: dict[str, list[str]], lattice_constant: float) -> np.ndarray:
     if "LATTICE_VECTORS" in blocks:
-        vectors = np.array(
-            [[float(value) for value in line.split()] for line in blocks["LATTICE_VECTORS"]], dtype=float
-        )
+        try:
+            vectors = np.array(
+                [[float(value) for value in line.split()] for line in blocks["LATTICE_VECTORS"]], dtype=float
+            )
+        except ValueError as exc:
+            raise ValueError("STRU file has malformed LATTICE_VECTORS block") from exc
+        if vectors.shape != (3, 3):
+            raise ValueError(f"STRU file LATTICE_VECTORS must have 3 rows of 3 values, got shape {vectors.shape}")
         return vectors * lattice_constant * Bohr
     if "LATTICE_PARAMETERS" in blocks or "LATTICE_PARAMETER" in blocks:
         raise ValueError(
@@ -105,15 +113,39 @@ def _parse_positions(
 ) -> tuple[list[str], np.ndarray]:
     """Parse the `ATOMIC_POSITIONS` block and preserve species ordering."""
 
+    if not lines:
+        raise ValueError("ATOMIC_POSITIONS block is empty")
     coord_type = lines[0].strip()
     symbols: list[str] = []
     coords: list[np.ndarray] = []
 
     index = 1
     while index < len(lines):
+        if index + 2 >= len(lines):
+            raise ValueError(
+                f"ATOMIC_POSITIONS: expected magnetic-moment and atom-count lines after "
+                f"species {lines[index]!r} at line {index + 1}, but block is truncated"
+            )
         symbol = lines[index]
-        _mag_each = float(lines[index + 1])
-        natom = int(lines[index + 2])
+        try:
+            _mag_each = float(lines[index + 1])
+        except ValueError:
+            raise ValueError(
+                f"ATOMIC_POSITIONS: invalid magnetic moment {lines[index + 1]!r} for species {symbol!r}"
+            ) from None
+        try:
+            natom = int(lines[index + 2])
+        except ValueError:
+            raise ValueError(
+                f"ATOMIC_POSITIONS: invalid atom count {lines[index + 2]!r} for species {symbol!r}"
+            ) from None
+        if natom < 0:
+            raise ValueError(f"ATOMIC_POSITIONS: negative atom count {natom} for species {symbol!r}")
+        if index + 3 + natom > len(lines):
+            raise ValueError(
+                f"ATOMIC_POSITIONS: expected {natom} atom lines for species {symbol!r}, "
+                f"but only {len(lines) - index - 3} remain"
+            )
         for offset in range(natom):
             parsed = _parse_atom_line(lines[index + 3 + offset])
             symbols.append(symbol)
@@ -132,6 +164,8 @@ def _parse_atom_line(line: str) -> ParsedAtomLine:
     """Parse one atom line, ignoring auxiliary ABACUS metadata fields."""
 
     fields = line.split()
+    if len(fields) < 3:
+        raise ValueError(f"atom line must have at least 3 coordinate values: {line!r}")
     result: ParsedAtomLine = {"coord": [float(value) for value in fields[:3]]}
 
     idx = 3

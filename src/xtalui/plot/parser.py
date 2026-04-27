@@ -197,17 +197,17 @@ def detect_numeric_columns(data: ParsedData) -> list[Column]:
     return list(data.columns)
 
 
-def auto_series(data: ParsedData, x_col: int, y_col: int) -> list[Series]:
+def auto_series(data: ParsedData, x_col: int, y_col: int, auto_group: bool = False) -> list[Series]:
     """Create one or more Series from parsed data given x/y column indices.
 
-    If a grouping column (non-numeric, repeating values like "Train"/"Val")
-    is detected, rows are split into separate series by group. Otherwise,
-    all rows form a single series.
+    If *auto_group* is True and a grouping column (non-numeric, repeating
+    values like "Train"/"Val") is detected, rows are split into separate
+    series by group. Otherwise, all rows form a single series.
     """
     token_rows = _tokenize_lines(list(data.raw_lines))
     numeric_positions = _detect_numeric_positions(token_rows)
 
-    group_col = _find_grouping_column(token_rows, numeric_positions)
+    group_col = _find_grouping_column(token_rows, numeric_positions) if auto_group else None
 
     # Map numeric column indices to their actual token-row positions.
     numeric_positions_list = [i for i, is_num in enumerate(numeric_positions) if is_num]

@@ -382,9 +382,10 @@ class ViewerState:
         )
 
     def body_height(self, width: int, height: int) -> int:
+        info_lines = INFO_PANEL_LINES if (self.camera.show_info and height >= INFO_PANEL_LINES * 2) else 0
         footer_lines = wrapped_line_count(self.status(), width)
         help_lines = wrapped_line_count(self.help_text(), width) if self.camera.show_help else 0
-        return max(height - INFO_PANEL_LINES - footer_lines - help_lines, 1)
+        return max(height - info_lines - footer_lines - help_lines, 1)
 
     def info_text(self) -> str:
         a_vec, b_vec, c_vec = self.info.lattice_vectors
@@ -457,7 +458,7 @@ class ViewerState:
     def help_text(self) -> str:
         if not self.camera.show_help:
             return ""
-        return "Arrows/hjkl rotate | a autorotate | p positions | B bond lengths | t play frames | T calibration | [/] frames | x/y/z align view | e select atom + Enter | d delete entry + Enter | dd delete last | r123 repeat | S sphere scale + Enter | Ctrl-R reset | 1 abc panel | 2 xyz panel | m mode | s spheres | Shift-Arrows pan | +/- zoom | Left/Right or h/l adjust aspect in calibration | b bonds | c cell | L labels | i indices | C color | j/k or Up/Down scroll active overlay | Esc cancel cmd | ? help | q quit"
+        return "Arrows/hjkl rotate | a autorotate | p positions | B bond lengths | t play frames | T calibration | [/] frames | x/y/z align view | e select atom + Enter | d delete entry + Enter | dd delete last | r123 repeat | S sphere scale + Enter | Ctrl-R reset | I info panel | 1 abc panel | 2 xyz panel | m mode | s spheres | Shift-Arrows pan | +/- zoom | Left/Right or h/l adjust aspect in calibration | b bonds | c cell | L labels | i indices | C color | j/k or Up/Down scroll active overlay | Esc cancel cmd | ? help | q quit"
 
     def toggle_calibration(self) -> None:
         self.calibration_mode = not self.calibration_mode
@@ -900,11 +901,14 @@ def build_application(state: ViewerState) -> Application:
     footer_control = FormattedTextControl(lambda: state.status())
     help_control = FormattedTextControl(lambda: state.help_text())
 
-    info_text_window = Window(content=info_control, always_hide_cursor=True)
+    info_text_window = Window(
+        content=info_control, always_hide_cursor=True, height=Dimension(preferred=INFO_PANEL_LINES, min=0)
+    )
     axis_window = ConditionalContainer(
         content=Window(
             content=axis_control,
             width=Dimension(preferred=AXIS_WIDGET_WIDTH, min=AXIS_WIDGET_WIDTH, max=AXIS_WIDGET_WIDTH),
+            height=Dimension(preferred=AXIS_WIDGET_HEIGHT, min=0, max=AXIS_WIDGET_HEIGHT),
             always_hide_cursor=True,
         ),
         filter=Condition(lambda: state.camera.show_abc_panel),
@@ -913,11 +917,28 @@ def build_application(state: ViewerState) -> Application:
         content=Window(
             content=cartesian_axis_control,
             width=Dimension(preferred=AXIS_WIDGET_WIDTH, min=AXIS_WIDGET_WIDTH, max=AXIS_WIDGET_WIDTH),
+            height=Dimension(preferred=AXIS_WIDGET_HEIGHT, min=0, max=AXIS_WIDGET_HEIGHT),
             always_hide_cursor=True,
         ),
         filter=Condition(lambda: state.camera.show_xyz_panel),
     )
-    info = VSplit([info_text_window, axis_window, cartesian_axis_window], height=INFO_PANEL_LINES)
+    def _info_visible():
+        if not state.camera.show_info:
+            return False
+        try:
+            rows = app.output.get_size().rows
+            return rows >= INFO_PANEL_LINES * 2
+        except Exception:
+            return True
+
+    info = ConditionalContainer(
+        content=VSplit(
+            [info_text_window, axis_window, cartesian_axis_window],
+            height=Dimension(preferred=INFO_PANEL_LINES, min=0, max=INFO_PANEL_LINES),
+            window_too_small=Window(FormattedTextControl(text=""), height=Dimension(min=0)),
+        ),
+        filter=Condition(_info_visible),
+    )
     body = FloatContainer(
         content=Window(content=body_control, always_hide_cursor=True),
         floats=[
@@ -980,7 +1001,12 @@ def build_application(state: ViewerState) -> Application:
         filter=Condition(lambda: state.camera.show_help),
     )
 
-    layout = Layout(HSplit([info, body, footer, help_window]))
+    layout = Layout(
+        HSplit(
+            [info, body, footer, help_window],
+            window_too_small=Window(FormattedTextControl(text=""), height=Dimension(min=0)),
+        )
+    )
     bindings = KeyBindings()
 
     @bindings.add("q")
@@ -1265,6 +1291,11 @@ def build_application(state: ViewerState) -> Application:
     @bindings.add("i")
     def _toggle_indices(event) -> None:
         state.camera = toggle_flag(state.camera, "show_indices")
+        event.app.invalidate()
+
+    @bindings.add("I")
+    def _toggle_info(event) -> None:
+        state.camera = toggle_flag(state.camera, "show_info")
         event.app.invalidate()
 
     @bindings.add("1")

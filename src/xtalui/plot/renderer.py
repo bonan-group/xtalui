@@ -653,7 +653,12 @@ def render_panels(
         return [("", "No data to plot\n")]
 
     all_x_arr = np.array(all_x)
-    valid_x = all_x_arr[all_x_arr > 0] if x_scale == "log" else all_x_arr
+    if x_scale == "log":
+        valid_x = all_x_arr[all_x_arr > 0]
+        if len(valid_x) == 0:
+            return [("", "Cannot use log scale: all x values <= 0\n")]
+    else:
+        valid_x = all_x_arr
 
     # Shared x bounds (in display space).
     if bounds is None:
@@ -681,9 +686,13 @@ def render_panels(
     for panel_idx, group in enumerate(series_groups):
         # Compute per-panel y bounds (in display space).
         all_y = np.concatenate([s.y for s in group])
-        valid_y = all_y[all_y > 0] if y_scale == "log" else all_y
         if y_scale == "log":
+            valid_y = all_y[all_y > 0]
+            if len(valid_y) == 0:
+                continue
             valid_y = np.log10(valid_y)
+        else:
+            valid_y = all_y
         y_margin = (float(np.max(valid_y)) - float(np.min(valid_y))) * 0.05
         if y_margin == 0:
             y_margin = 0.5

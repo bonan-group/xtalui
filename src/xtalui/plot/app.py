@@ -48,6 +48,7 @@ class PlotState:
         y_scale: ScaleType = "linear",
         show_color: bool = False,
         show_legend: bool = False,
+        auto_group: bool = False,
     ) -> None:
         self.data = data
         self.columns = detect_numeric_columns(data)
@@ -55,6 +56,7 @@ class PlotState:
         self.y_col_index = y_col_index
         self.y_col_indices: list[int] = y_col_indices if y_col_indices is not None else [y_col_index]
         self.multi_column = multi_column
+        self.auto_group = auto_group
         self.zoom: float = 1.0
         self.pan_x: float = 0.0
         self.pan_y: float = 0.0
@@ -78,7 +80,7 @@ class PlotState:
         if self.multi_column and len(self.y_col_indices) > 1:
             self.series_list: list[Series] = multi_series(self.data, self.x_col_index, self.y_col_indices)
         else:
-            self.series_list = auto_series(self.data, self.x_col_index, self.y_col_index)
+            self.series_list = auto_series(self.data, self.x_col_index, self.y_col_index, auto_group=self.auto_group)
         self._auto_bounds = self._compute_auto_bounds()
 
     def _compute_auto_bounds(self) -> PlotBounds:
@@ -181,6 +183,7 @@ class PlotState:
         self.zoom = 1.0
         self.pan_x = 0.0
         self.pan_y = 0.0
+        self._custom_bounds = None
         self.status_message = "view reset"
 
     def toggle_grid(self) -> None:
@@ -208,6 +211,11 @@ class PlotState:
     def toggle_legend(self) -> None:
         self.show_legend = not self.show_legend
         self.status_message = f"legend {'on' if self.show_legend else 'off'}"
+
+    def toggle_auto_group(self) -> None:
+        self.auto_group = not self.auto_group
+        self._refresh_series()
+        self.status_message = f"auto-group {'on' if self.auto_group else 'off'}  series={len(self.series_list)}"
 
     def toggle_plot_mode(self) -> None:
         modes = ["scatter", "line", "both"]
@@ -310,6 +318,8 @@ class PlotState:
         ]
         if self.multi_column:
             parts.append("multi")
+        if self.auto_group:
+            parts.append("group")
         if self.show_legend:
             parts.append("legend")
         if self.status_message:
@@ -331,7 +341,7 @@ class PlotState:
             return ""
         return (
             "Arrow=pan  +/-=zoom  m=scatter/line  g=grid  M=multi-col  L=legend  "
-            "X=x-scale  Y=y-scale  C=color  c=columns  Ctrl-R=reset  ?=help  q=quit"
+            "G=auto-group  X=x-scale  Y=y-scale  C=color  c=columns  Ctrl-R=reset  ?=help  q=quit"
         )
 
     def column_selector_text(self) -> str:
@@ -575,6 +585,11 @@ def build_plot_application(state: PlotState) -> Application:
     @bindings.add("L")
     def _toggle_legend(event: object) -> None:
         state.toggle_legend()
+        event.app.invalidate()
+
+    @bindings.add("G")
+    def _toggle_auto_group(event: object) -> None:
+        state.toggle_auto_group()
         event.app.invalidate()
 
     @bindings.add("c")

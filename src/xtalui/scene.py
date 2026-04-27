@@ -60,6 +60,7 @@ class CameraState:
     pan_x: float = 0.0
     pan_y: float = 0.0
     zoom: float = 1.0
+    show_info: bool = True
     show_abc_panel: bool = True
     show_xyz_panel: bool = True
     line_mode: str = "braille"

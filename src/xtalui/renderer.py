@@ -197,6 +197,8 @@ def _place_cell_label(
 
 
 def _element_style(atomic_number: int) -> str:
+    if atomic_number < 0 or atomic_number >= len(jmol_colors):
+        return ""
     red, green, blue = jmol_colors[atomic_number]
     return f"fg:#{int(round(red * 255)):02x}{int(round(green * 255)):02x}{int(round(blue * 255)):02x}"
 
@@ -210,7 +212,9 @@ def _atom_style(atomic_number: int, atom_index: int, camera: CameraState, option
 
 
 def _atom_radius_in_cells(atomic_number: int, scale: float, options: RenderOptions) -> float:
-    return max(float(covalent_radii[atomic_number]) * scale * options.atom_radius_scale, 0.75)
+    if 0 <= atomic_number < len(covalent_radii):
+        return max(float(covalent_radii[atomic_number]) * scale * options.atom_radius_scale, 0.75)
+    return 0.75
 
 
 def _sphere_primitives(

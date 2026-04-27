@@ -99,7 +99,7 @@ class TestAutoSeries:
     def test_detects_grouping_column(self) -> None:
         text = "Train 0.1 0.2\nTrain 0.3 0.4\nVal 0.5 0.6\nVal 0.7 0.8\n"
         data = parse_text(text)
-        series_list = auto_series(data, 0, 1)
+        series_list = auto_series(data, 0, 1, auto_group=True)
         assert len(series_list) == 2
         assert series_list[0].name == "Train"
         assert series_list[1].name == "Val"
@@ -349,7 +349,7 @@ class TestPlotState:
         data = parse_text("Train 0.1 0.2\nTrain 0.3 0.4\nVal 0.5 0.6\nVal 0.7 0.8\n")
         from xtalui.plot.app import PlotState
 
-        state = PlotState(data, x_col_index=0, y_col_index=1)
+        state = PlotState(data, x_col_index=0, y_col_index=1, auto_group=True)
         assert len(state.series_list) == 2
         # Simulate the two-step column selector: pick x, then pick y.
         state.begin_column_select()
