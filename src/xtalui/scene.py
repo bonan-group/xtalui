@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+from typing import Generator
 
 import numpy as np
 from ase import Atoms
@@ -26,6 +29,21 @@ Vector3 = NDArray[np.float64]
 BondRecord = tuple[int, int, float, tuple[int, int, int]]
 PathInput = str | Path
 StructurePaths = PathInput | Sequence[PathInput]
+
+
+@contextmanager
+def _suppress_stderr() -> Generator[None, None, None]:
+    devnull = os.open(os.devnull, os.O_WRONLY)
+    old_stderr = os.dup(2)
+    try:
+        os.dup2(devnull, 2)
+        yield
+    finally:
+        try:
+            os.dup2(old_stderr, 2)
+        finally:
+            os.close(devnull)
+            os.close(old_stderr)
 
 
 @dataclass(frozen=True)
@@ -97,15 +115,29 @@ class RenderPrimitive:
 
 
 def load_structure(
-    paths: StructurePaths, repeat: tuple[int, int, int] = (1, 1, 1), image_number: str = ":"
+    paths: StructurePaths,
+    repeat: tuple[int, int, int] = (1, 1, 1),
+    image_number: str = ":",
+    filter_labels: Sequence[str] | None = None,
+    symprec: float = 1e-5,
 ) -> SceneData:
     """Load the first structure frame from one or more path inputs."""
 
-    return load_structures(paths, repeat, image_number=image_number)[0]
+    return load_structures(
+        paths,
+        repeat,
+        image_number=image_number,
+        filter_labels=filter_labels,
+        symprec=symprec,
+    )[0]
 
 
 def load_structures(
-    paths: StructurePaths, repeat: tuple[int, int, int] = (1, 1, 1), image_number: str = ":"
+    paths: StructurePaths,
+    repeat: tuple[int, int, int] = (1, 1, 1),
+    image_number: str = ":",
+    filter_labels: Sequence[str] | None = None,
+    symprec: float = 1e-5,
 ) -> list[SceneData]:
     """Load one or more structures, expanding repeats and frame selections."""
 
@@ -113,7 +145,10 @@ def load_structures(
     for path_input in _normalize_paths(paths):
         path, file_image_number, title = _resolve_path_input(path_input, image_number)
         atoms_series = read_structure_series(path, image_number=file_image_number)
-        scenes.extend(_scene_from_atoms(_repeat_atoms(atoms, repeat), title) for atoms in atoms_series)
+        atoms_series = _filter_by_label(atoms_series, filter_labels)
+        for atoms in atoms_series:
+            atoms = _repeat_atoms(atoms, repeat)
+            scenes.append(scene_from_atoms(atoms, title))
     return scenes
 
 
@@ -199,7 +234,7 @@ def _repeat_atoms(atoms: Atoms, repeat: tuple[int, int, int]) -> Atoms:
     return atoms.repeat(repeat)
 
 
-def _scene_from_atoms(atoms: Atoms, title: str) -> SceneData:
+def scene_from_atoms(atoms: Atoms, title: str) -> SceneData:
     positions = np.asarray(atoms.get_positions(), dtype=float)
     return SceneData(
         atoms=atoms,
@@ -208,6 +243,62 @@ def _scene_from_atoms(atoms: Atoms, title: str) -> SceneData:
         cell=np.asarray(atoms.cell.array, dtype=float),
         title=title,
     )
+
+
+def _filter_by_label(atoms_series: Sequence[Atoms], filter_labels: Sequence[str] | None) -> list[Atoms]:
+    """Keep only frames whose ``atoms.info`` label matches one of *filter_labels*."""
+
+    if not filter_labels:
+        return list(atoms_series)
+    label_set = set(filter_labels)
+    kept: list[Atoms] = []
+    for atoms in atoms_series:
+        info = atoms.info
+        for key in ("label", "dft_label"):
+            value = info.get(key)
+            if value is not None and str(value) in label_set:
+                kept.append(atoms)
+                break
+    return kept
+
+
+def refine_atoms(atoms: Atoms, symprec: float = 1e-5) -> Atoms:
+    """Refine cell and positions using spglib's ``refine_cell``."""
+
+    if spglib is None:
+        return atoms
+    if not any(atoms.pbc):
+        return atoms
+    cell_tuple = (
+        np.asarray(atoms.cell.array, dtype=float),
+        np.asarray(atoms.get_scaled_positions(), dtype=float),
+        np.asarray(atoms.get_atomic_numbers(), dtype=int),
+    )
+    try:
+        with _suppress_stderr():
+            refined = spglib.refine_cell(cell_tuple, symprec=symprec)
+    except Exception:
+        return atoms
+    if refined is None:
+        return atoms
+    lattice, positions, numbers = refined
+    refined_atoms = Atoms(
+        numbers=numbers,
+        scaled_positions=positions,
+        cell=lattice,
+        pbc=atoms.pbc,
+    )
+    refined_atoms.info = dict(atoms.info)
+    return refined_atoms
+
+
+def wrap_atoms(atoms: Atoms) -> Atoms:
+    """Wrap atomic positions back into the unit cell."""
+
+    if np.any(atoms.cell.array):
+        atoms = atoms.copy()
+        atoms.wrap()
+    return atoms
 
 
 def structure_info(scene: SceneData, symprec: float = 1e-5) -> StructureInfo:
@@ -236,7 +327,11 @@ def spacegroup_label(atoms: Atoms, symprec: float = 1e-5) -> str:
         np.asarray(atoms.get_scaled_positions(), dtype=float),
         np.asarray(atoms.get_atomic_numbers(), dtype=int),
     )
-    dataset = spglib.get_symmetry_dataset(cell, symprec=symprec)
+    try:
+        with _suppress_stderr():
+            dataset = spglib.get_symmetry_dataset(cell, symprec=symprec)
+    except Exception:
+        return "Unknown"
     if dataset is None:
         return "Unknown"
     if hasattr(dataset, "international"):

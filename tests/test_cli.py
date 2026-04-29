@@ -67,3 +67,57 @@ def test_cli_accepts_filename_slice_override() -> None:
     parser = build_parser()
     args = parser.parse_args(["frames.xyz@-2:", "other.xyz"])
     assert args.paths == ["frames.xyz@-2:", "other.xyz"]
+
+
+def test_cli_accepts_wrap_flag() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["example.cif", "--wrap"])
+    assert args.wrap is True
+
+
+def test_cli_accepts_wrap_short_flag() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["example.cif", "-w"])
+    assert args.wrap is True
+
+
+def test_cli_wrap_defaults_to_false() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["example.cif"])
+    assert args.wrap is False
+
+
+def test_cli_accepts_refine_flag() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["example.cif", "--refine"])
+    assert args.refine is True
+
+
+def test_cli_refine_defaults_to_false() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["example.cif"])
+    assert args.refine is False
+
+
+def test_cli_accepts_filter_label() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["example.cif", "--filter-label", "alpha"])
+    assert args.filter_label == ["alpha"]
+
+
+def test_cli_accepts_filter_label_short() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["example.cif", "-f", "alpha"])
+    assert args.filter_label == ["alpha"]
+
+
+def test_cli_accepts_multiple_filter_labels() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["example.cif", "-f", "alpha", "-f", "beta"])
+    assert args.filter_label == ["alpha", "beta"]
+
+
+def test_cli_filter_label_defaults_to_none() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["example.cif"])
+    assert args.filter_label is None

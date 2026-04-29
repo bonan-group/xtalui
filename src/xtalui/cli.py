@@ -58,6 +58,25 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_false",
         help="Start with element colors disabled",
     )
+    parser.add_argument(
+        "-w",
+        "--wrap",
+        action="store_true",
+        help="Wrap atoms back into the unit cell on load",
+    )
+    parser.add_argument(
+        "--refine",
+        action="store_true",
+        help="Refine the cell using spglib symmetry operations",
+    )
+    parser.add_argument(
+        "-f",
+        "--filter-label",
+        action="append",
+        default=None,
+        metavar="LABEL",
+        help="Only show structures whose atoms.info label/dft_label matches LABEL (repeatable)",
+    )
     return parser
 
 
@@ -73,6 +92,9 @@ def main() -> None:
         show_cell=not args.hide_cell,
         symprec=args.symprec,
         show_color=args.color,
+        wrap=args.wrap,
+        refine=args.refine,
+        filter_labels=tuple(args.filter_label) if args.filter_label else None,
     )
 
 

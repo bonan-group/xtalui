@@ -22,13 +22,16 @@ from xtalui.scene import (
     RenderOptions,
     SceneData,
     StructureInfo,
+    scene_from_atoms,
     bond_records,
     cycle_line_mode,
     load_structures,
+    refine_atoms,
     reset_camera,
     structure_info,
     toggle_flag,
     view_along,
+    wrap_atoms,
     with_pan,
     with_rotation,
     with_zoom,
@@ -67,12 +70,18 @@ class ViewerState:
         show_labels: bool = True,
         show_spheres: bool = True,
         image_number: str = ":",
+        wrap: bool = False,
+        refine: bool = False,
+        filter_labels: Sequence[str] | None = None,
     ) -> None:
         self.paths: tuple[str | Path, ...] = tuple(paths)
         self.image_number = image_number
         self.initial_repeat: tuple[int, int, int] = tuple(int(value) for value in repeat)
         self.repeat = self.initial_repeat
         self.symprec = symprec
+        self.wrap = wrap
+        self.refine = refine
+        self.filter_labels: tuple[str, ...] | None = tuple(filter_labels) if filter_labels else None
         self.camera = CameraState(
             show_cell=show_cell,
             show_color=show_color,
@@ -99,19 +108,49 @@ class ViewerState:
         self.frame_index = 0
         self.scenes: list[SceneData] = []
         self.infos: list[StructureInfo] = []
+        self._processed_scenes: dict[int, SceneData] = {}
+        self._processed_infos: dict[int, StructureInfo] = {}
         self.reload_scene()
 
     @property
     def scene(self) -> SceneData:
         """Return the currently visible frame."""
 
+        if self.wrap or self.refine:
+            return self._get_processed_scene(self.frame_index)
         return self.scenes[self.frame_index]
 
     @property
     def info(self) -> StructureInfo:
         """Return display metadata for the current frame."""
 
+        if self.wrap or self.refine:
+            return self._get_processed_info(self.frame_index)
         return self.infos[self.frame_index]
+
+    def _ensure_processed(self, index: int) -> None:
+        """Apply wrap/refine to the frame at *index* and cache the result."""
+
+        if index in self._processed_scenes:
+            return
+        raw_scene = self.scenes[index]
+        atoms = raw_scene.atoms
+        if self.refine:
+            atoms = refine_atoms(atoms, symprec=self.symprec)
+        if self.wrap:
+            atoms = wrap_atoms(atoms)
+        processed_scene = scene_from_atoms(atoms, raw_scene.title)
+        processed_info = structure_info(processed_scene, symprec=self.symprec)
+        self._processed_scenes[index] = processed_scene
+        self._processed_infos[index] = processed_info
+
+    def _get_processed_scene(self, index: int) -> SceneData:
+        self._ensure_processed(index)
+        return self._processed_scenes[index]
+
+    def _get_processed_info(self, index: int) -> StructureInfo:
+        self._ensure_processed(index)
+        return self._processed_infos[index]
 
     @property
     def frame_count(self) -> int:
@@ -120,10 +159,22 @@ class ViewerState:
     def reload_scene(self) -> None:
         """Reload structures after repeat or input changes."""
 
-        self.scenes = load_structures(self.paths, self.repeat, image_number=self.image_number)
+        self.scenes = load_structures(
+            self.paths,
+            self.repeat,
+            image_number=self.image_number,
+            filter_labels=self.filter_labels,
+            symprec=self.symprec,
+        )
         self.infos = [structure_info(scene, symprec=self.symprec) for scene in self.scenes]
-        self.frame_index = min(self.frame_index, len(self.scenes) - 1)
-        self.frame_selections = [[] for _ in self.scenes]
+        self._processed_scenes.clear()
+        self._processed_infos.clear()
+        if not self.scenes:
+            self.frame_index = 0
+            self.frame_selections = []
+        else:
+            self.frame_index = min(self.frame_index, len(self.scenes) - 1)
+            self.frame_selections = [[] for _ in self.scenes]
         self.pending_repeat_command = None
         self.pending_sphere_scale_command = None
         self.pending_select_command = None
@@ -345,8 +396,13 @@ class ViewerState:
         self.bond_scroll = 0
         self.sphere_scale = self.initial_sphere_scale
         self.frame_selections = [[] for _ in self.scenes]
-        if self.repeat != self.initial_repeat:
-            self.repeat = self.initial_repeat
+        reload_needed = self.repeat != self.initial_repeat
+        self.repeat = self.initial_repeat
+        self.wrap = False
+        self.refine = False
+        self._processed_scenes.clear()
+        self._processed_infos.clear()
+        if reload_needed:
             self.reload_scene()
         self.status_message = f"view reset; repeat={self.repeat[0]}x{self.repeat[1]}x{self.repeat[2]}"
 
@@ -443,7 +499,9 @@ class ViewerState:
             f"cell={'on' if self.camera.show_cell else 'off'}  "
             f"bonds={'on' if self.camera.show_bonds else 'off'}  "
             f"labels={'on' if self.camera.show_labels else 'off'}  "
-            f"indices={'on' if self.camera.show_indices else 'off'}",
+            f"indices={'on' if self.camera.show_indices else 'off'}  "
+            f"wrap={'on' if self.wrap else 'off'}  "
+            f"refine={'on' if self.refine else 'off'}",
         ]
         if self.pending_repeat_command is not None:
             parts.append(self.repeat_prompt())
@@ -458,11 +516,23 @@ class ViewerState:
     def help_text(self) -> str:
         if not self.camera.show_help:
             return ""
-        return "Arrows/hjkl rotate | a autorotate | p positions | B bond lengths | t play frames | T calibration | [/] frames | x/y/z align view | e select atom + Enter | d delete entry + Enter | dd delete last | r123 repeat | S sphere scale + Enter | Ctrl-R reset | I info panel | 1 abc panel | 2 xyz panel | m mode | s spheres | Shift-Arrows pan | +/- zoom | Left/Right or h/l adjust aspect in calibration | b bonds | c cell | L labels | i indices | C color | j/k or Up/Down scroll active overlay | Esc cancel cmd | ? help | q quit"
+        return "Arrows/hjkl rotate | a autorotate | p positions | B bond lengths | t play frames | T calibration | [/] frames | x/y/z align view | e select atom + Enter | d delete entry + Enter | dd delete last | r123 repeat | S sphere scale + Enter | Ctrl-R reset | I info panel | 1 abc panel | 2 xyz panel | m mode | s spheres | Shift-Arrows pan | +/- zoom | Left/Right or h/l adjust aspect in calibration | b bonds | c cell | L labels | i indices | C color | w wrap | R refine | j/k or Up/Down scroll active overlay | Esc cancel cmd | ? help | q quit"
 
     def toggle_calibration(self) -> None:
         self.calibration_mode = not self.calibration_mode
         self.status_message = f"calibration {'on' if self.calibration_mode else 'off'}"
+
+    def toggle_wrap(self) -> None:
+        self.wrap = not self.wrap
+        self._processed_scenes.clear()
+        self._processed_infos.clear()
+        self.status_message = f"wrap {'on' if self.wrap else 'off'}"
+
+    def toggle_refine(self) -> None:
+        self.refine = not self.refine
+        self._processed_scenes.clear()
+        self._processed_infos.clear()
+        self.status_message = f"refine {'on' if self.refine else 'off'}"
 
     def adjust_aspect_ratio(self, delta: float) -> None:
         self.aspect_ratio = min(max(self.aspect_ratio + delta, ASPECT_RATIO_MIN), ASPECT_RATIO_MAX)
@@ -1294,6 +1364,16 @@ def build_application(state: ViewerState) -> Application:
         state.camera = toggle_flag(state.camera, "show_indices")
         event.app.invalidate()
 
+    @bindings.add("w")
+    def _toggle_wrap(event) -> None:
+        state.toggle_wrap()
+        event.app.invalidate()
+
+    @bindings.add("R")
+    def _toggle_refine(event) -> None:
+        state.toggle_refine()
+        event.app.invalidate()
+
     @bindings.add("I")
     def _toggle_info(event) -> None:
         state.camera = toggle_flag(state.camera, "show_info")
@@ -1381,6 +1461,9 @@ def run_viewer(
     show_color: bool = True,
     show_labels: bool = True,
     show_spheres: bool = True,
+    wrap: bool = False,
+    refine: bool = False,
+    filter_labels: Sequence[str] | None = None,
 ) -> None:
     """Launch the full-screen terminal viewer."""
 
@@ -1393,6 +1476,9 @@ def run_viewer(
         show_labels=show_labels,
         show_spheres=show_spheres,
         image_number=image_number,
+        wrap=wrap,
+        refine=refine,
+        filter_labels=filter_labels,
     )
     app = build_application(state)
     app.run()

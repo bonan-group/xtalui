@@ -21,7 +21,17 @@ from xtalui.app import (
     wrapped_line_count,
 )
 from xtalui.renderer import BRAILLE_BASE
-from xtalui.scene import CameraState, SceneData, cycle_line_mode, default_orientation, view_along
+from xtalui.scene import (
+    CameraState,
+    SceneData,
+    _filter_by_label,
+    wrap_atoms,
+    cycle_line_mode,
+    default_orientation,
+    load_structures,
+    refine_atoms,
+    view_along,
+)
 
 
 def _visual_length(point: tuple[float, float], center: tuple[int, int]) -> float:
@@ -680,3 +690,214 @@ def test_calibration_mode_toggles_and_adjusts_aspect_ratio(tmp_path) -> None:
     assert state.calibration_mode is True
     assert state.aspect_ratio == initial_aspect + 0.2
     assert "cal=on" in state.status()
+
+
+def test_wrap_atoms_wraps_positions_into_cell() -> None:
+    atoms = bulk("Si", "diamond", a=5.431, cubic=True)
+    shifted = atoms.copy()
+    shifted.positions += atoms.cell[0] * 1.5
+    scaled = shifted.get_scaled_positions(wrap=False)
+    assert np.any(scaled > 1.0 - 1e-6) or np.any(scaled < -1e-6)
+    wrapped = wrap_atoms(shifted)
+    wrapped_scaled = wrapped.get_scaled_positions(wrap=False)
+    assert np.all(wrapped_scaled >= -1e-10)
+    assert np.all(wrapped_scaled <= 1.0 + 1e-10)
+
+
+def test_wrap_atoms_leaves_zero_cell_unchanged() -> None:
+    atoms = Atoms("H", positions=[[5.0, 5.0, 5.0]], cell=np.zeros((3, 3)), pbc=False)
+    wrapped = wrap_atoms(atoms)
+    assert np.allclose(wrapped.positions, atoms.positions)
+
+
+def test_filter_by_label_keeps_matching_frames() -> None:
+    a1 = Atoms("H", positions=[[0, 0, 0]], cell=np.eye(3), pbc=True)
+    a1.info["label"] = "alpha"
+    a2 = Atoms("He", positions=[[0, 0, 0]], cell=np.eye(3), pbc=True)
+    a2.info["label"] = "beta"
+    a3 = Atoms("Li", positions=[[0, 0, 0]], cell=np.eye(3), pbc=True)
+    a3.info["dft_label"] = "alpha"
+
+    kept = _filter_by_label([a1, a2, a3], ["alpha"])
+    assert len(kept) == 2
+    assert kept[0].get_chemical_symbols() == ["H"]
+    assert kept[1].get_chemical_symbols() == ["Li"]
+
+
+def test_filter_by_label_returns_all_when_no_labels_given() -> None:
+    atoms = Atoms("H", positions=[[0, 0, 0]], cell=np.eye(3), pbc=True)
+    assert _filter_by_label([atoms], None) == [atoms]
+    assert _filter_by_label([atoms], []) == [atoms]
+
+
+def test_filter_by_label_returns_empty_when_no_match() -> None:
+    atoms = Atoms("H", positions=[[0, 0, 0]], cell=np.eye(3), pbc=True)
+    atoms.info["label"] = "gamma"
+    kept = _filter_by_label([atoms], ["alpha", "beta"])
+    assert kept == []
+
+
+def test_toggle_wrap_toggles_flag_without_reload(tmp_path) -> None:
+    path = tmp_path / "si.cif"
+    write(path, bulk("Si", "diamond", a=5.431, cubic=True))
+    state = ViewerState(paths=[path], repeat=(1, 1, 1), show_cell=True, symprec=1e-5, show_color=False)
+    assert state.wrap is False
+    assert "wrap=off" in state.status()
+
+    state.toggle_wrap()
+
+    assert state.wrap is True
+    assert "wrap=on" in state.status()
+    assert len(state._processed_scenes) == 0
+
+
+def test_toggle_refine_toggles_flag_without_reload(tmp_path) -> None:
+    path = tmp_path / "si.cif"
+    write(path, bulk("Si", "diamond", a=5.431, cubic=True))
+    state = ViewerState(paths=[path], repeat=(1, 1, 1), show_cell=True, symprec=1e-5, show_color=False)
+    assert state.refine is False
+    assert "refine=off" in state.status()
+
+    state.toggle_refine()
+
+    assert state.refine is True
+    assert "refine=on" in state.status()
+    assert len(state._processed_scenes) == 0
+
+
+def test_refine_is_lazy_per_frame(tmp_path) -> None:
+    atoms_a = bulk("Si", "diamond", a=5.431, cubic=True)
+    atoms_b = bulk("Si", "diamond", a=5.531, cubic=True)
+    path = tmp_path / "series.xyz"
+    write(path, [atoms_a, atoms_b], format="extxyz")
+    state = ViewerState(paths=[path], repeat=(1, 1, 1), show_cell=True, symprec=1e-5, show_color=False)
+    state.toggle_refine()
+
+    assert len(state._processed_scenes) == 0
+
+    _ = state.scene
+    assert 0 in state._processed_scenes
+    assert 1 not in state._processed_scenes
+
+    state.step_frame(1)
+    _ = state.scene
+    assert 1 in state._processed_scenes
+
+
+def test_refine_uses_cache_on_revisit(tmp_path) -> None:
+    atoms_a = bulk("Si", "diamond", a=5.431, cubic=True)
+    atoms_b = bulk("Si", "diamond", a=5.531, cubic=True)
+    path = tmp_path / "series.xyz"
+    write(path, [atoms_a, atoms_b], format="extxyz")
+    state = ViewerState(paths=[path], repeat=(1, 1, 1), show_cell=True, symprec=1e-5, show_color=False)
+    state.toggle_refine()
+
+    _ = state.scene
+    cached_scene = state._processed_scenes[0]
+
+    state.step_frame(1)
+    _ = state.scene
+    state.step_frame(-1)
+
+    assert state.scene is cached_scene
+    assert len(state._processed_scenes) == 2
+
+
+def test_refine_info_is_lazy_per_frame(tmp_path) -> None:
+    atoms_a = bulk("Si", "diamond", a=5.431, cubic=True)
+    atoms_b = bulk("Si", "diamond", a=5.531, cubic=True)
+    path = tmp_path / "series.xyz"
+    write(path, [atoms_a, atoms_b], format="extxyz")
+    state = ViewerState(paths=[path], repeat=(1, 1, 1), show_cell=True, symprec=1e-5, show_color=False)
+    state.toggle_refine()
+
+    assert len(state._processed_infos) == 0
+
+    _ = state.info
+    assert 0 in state._processed_infos
+    assert 1 not in state._processed_infos
+
+
+def test_refine_atoms_returns_refined_structure() -> None:
+    atoms = bulk("Si", "diamond", a=5.431, cubic=True)
+    np.random.seed(42)
+    atoms.positions += np.random.randn(*atoms.positions.shape) * 0.01
+    refined = refine_atoms(atoms, symprec=1e-3)
+    assert len(refined) == len(atoms)
+    assert refined.get_chemical_symbols() == atoms.get_chemical_symbols()
+
+
+def test_reset_viewer_resets_wrap_and_refine(tmp_path) -> None:
+    path = tmp_path / "si.cif"
+    write(path, bulk("Si", "diamond", a=5.431, cubic=True))
+    state = ViewerState(paths=[path], repeat=(1, 1, 1), show_cell=True, symprec=1e-5, show_color=False)
+
+    state.toggle_wrap()
+    state.toggle_refine()
+    _ = state.scene
+    assert state.wrap is True
+    assert state.refine is True
+    assert len(state._processed_scenes) == 1
+
+    state.reset_viewer()
+    assert state.wrap is False
+    assert state.refine is False
+    assert len(state._processed_scenes) == 0
+    assert "wrap=off" in state.status()
+    assert "refine=off" in state.status()
+
+
+def test_wrap_is_lazy_per_frame(tmp_path) -> None:
+    atoms_a = bulk("Si", "diamond", a=5.431, cubic=True)
+    atoms_b = bulk("Si", "diamond", a=5.531, cubic=True)
+    path = tmp_path / "series.xyz"
+    write(path, [atoms_a, atoms_b], format="extxyz")
+    state = ViewerState(paths=[path], repeat=(1, 1, 1), show_cell=True, symprec=1e-5, show_color=False)
+    state.toggle_wrap()
+
+    assert len(state._processed_scenes) == 0
+
+    scene0 = state.scene
+    assert 0 in state._processed_scenes
+    assert 1 not in state._processed_scenes
+    scaled = scene0.atoms.get_scaled_positions()
+    assert np.all(scaled >= -1e-10) and np.all(scaled <= 1.0 + 1e-10)
+
+    state.step_frame(1)
+    scene1 = state.scene
+    assert 1 in state._processed_scenes
+    scaled1 = scene1.atoms.get_scaled_positions()
+    assert np.all(scaled1 >= -1e-10) and np.all(scaled1 <= 1.0 + 1e-10)
+
+
+def test_load_structures_with_filter_labels(tmp_path) -> None:
+    a1 = Atoms("H", positions=[[0, 0, 0]], cell=np.eye(3), pbc=True)
+    a1.info["label"] = "alpha"
+    a2 = Atoms("He", positions=[[0, 0, 0]], cell=np.eye(3), pbc=True)
+    a2.info["label"] = "beta"
+    path = tmp_path / "series.xyz"
+    write(path, [a1, a2], format="extxyz")
+
+    scenes = load_structures([path], filter_labels=["alpha"])
+    assert len(scenes) == 1
+    assert scenes[0].symbols == ["H"]
+
+
+def test_viewer_state_with_filter_labels(tmp_path) -> None:
+    a1 = Atoms("H", positions=[[0, 0, 0]], cell=np.eye(3), pbc=True)
+    a1.info["label"] = "alpha"
+    a2 = Atoms("He", positions=[[0, 0, 0]], cell=np.eye(3), pbc=True)
+    a2.info["label"] = "beta"
+    path = tmp_path / "series.xyz"
+    write(path, [a1, a2], format="extxyz")
+
+    state = ViewerState(
+        paths=[path],
+        repeat=(1, 1, 1),
+        show_cell=True,
+        symprec=1e-5,
+        show_color=False,
+        filter_labels=["beta"],
+    )
+    assert state.frame_count == 1
+    assert state.scene.symbols == ["He"]

@@ -30,6 +30,9 @@ It renders structures directly in the terminal using:
 - Autoplay continuous rotation directly in the terminal
 - Autoplay multi-frame structure series directly in the terminal
 - Align the view along `x`, `y`, or `z` with one keypress
+- Wrap atoms back into the unit cell with `--wrap` / `-w` or the `w` key
+- Refine the cell using spglib symmetry operations with `--refine` or the `R` key
+- Filter multi-frame structures by label with `--filter-label` / `-f`
 
 ## Installation
 
@@ -120,6 +123,9 @@ uv run xtal trajectory.xyz@::10 other.xyz@-5:
 uv run xtal POSCAR -r 2 2 1
 uv run xtal structure.cif -s 1e-3
 uv run xtal structure.cif -c
+uv run xtal structure.cif -w          # wrap atoms into unit cell
+uv run xtal structure.cif --refine    # refine cell with spglib
+uv run xtal trajectory.xyz -f Train -f Val  # filter by label
 uv run xtal STRU
 ```
 
@@ -142,6 +148,9 @@ uv run xtal examples/graphite_hexagonal.cif
 - `--hide-cell`: start with the unit cell hidden
 - `-s FLOAT`, `--symprec FLOAT`: set the symmetry tolerance used for space-group detection
 - `-c`, `--color`: start with element colors enabled
+- `-w`, `--wrap`: wrap atoms back into the unit cell
+- `--refine`: refine the cell using spglib symmetry operations
+- `-f LABEL`, `--filter-label LABEL`: only show structures whose `atoms.info["label"]` or `atoms.info["dft_label"]` matches LABEL (repeatable)
 
 ## Controls
 
@@ -166,8 +175,10 @@ uv run xtal examples/graphite_hexagonal.cif
 - `c`: toggle unit cell
 - `C`: toggle element colors
 - `s`: toggle sphere mode for atoms
+- `w`: toggle wrap (wrap atoms back into the unit cell)
+- `R`: toggle refine (refine the cell using spglib symmetry operations)
 - `Left` / `Right` or `+` / `-` in calibration mode: decrease or increase the render aspect ratio
-- `Ctrl-R`: reset the view camera and restore the launch repeat
+- `Ctrl-R`: reset the view camera, restore the launch repeat, and clear wrap/refine caches
 - `l`: toggle labels
 - `Esc`: cancel an in-progress repeat command
 - `?`: toggle help
@@ -212,6 +223,29 @@ Both overlays are scrollable with:
 
 The overlays are drawn over the main view, so opening them does not rescale the structure display.
 
+## Wrap and Refine
+
+The viewer can apply two on-demand transforms to any frame, toggled at runtime without reloading:
+
+- **Wrap** (`w` key or `--wrap` / `-w`) — wraps all atomic positions back into the unit cell using ASE's `atoms.wrap()`.
+- **Refine** (`R` key or `--refine`) — refines the cell and atomic positions using spglib's `refine_cell()`. Only supported for periodic structures.
+
+### Processing order
+
+When both are active, refine runs first, then wrap:
+
+```
+raw frame → refine → wrap → displayed frame
+```
+
+### Lazy evaluation and caching
+
+Each frame is processed on demand when first viewed. The result is cached so that revisiting a frame does not repeat the computation. Toggling either option clears the entire cache.
+
+### Ctrl-R reset
+
+`Ctrl-R` resets the camera, restores the launch repeat, turns both wrap and refine off, and clears all caches.
+
 ## Atom Rendering
 
 By default, atoms are shown as points. Press `s` to switch to sphere mode.
@@ -226,6 +260,7 @@ By default, atoms are shown as points. Press `s` to switch to sphere mode.
 - Space-group detection uses `spglib` through ASE-compatible structure data.
 - Bond detection follows the ASE GUI heuristic: a periodic neighbor list with a `1.5x` covalent-radius cutoff.
 - Color mode uses ASE Jmol-style element colors for atoms and atom labels.
+- Label filtering (`--filter-label` / `-f`) matches against `atoms.info["label"]` or `atoms.info["dft_label"]` and is applied at load time only.
 - ABACUS `STRU` support is built in for files that include explicit `LATTICE_VECTORS`.
 - `STRU` files that rely on `LATTICE_PARAMETER(S)` plus `latname` from a separate `INPUT` file are not supported.
 - Braille mode is the default line renderer because it provides smoother terminal line quality.
